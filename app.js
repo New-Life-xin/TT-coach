@@ -83,10 +83,12 @@ const LIVE = {
   preSec: 0.8, postSec: 0.6,   // 挥拍段截取窗口（与离线分割一致）
   endRatio: 0.45,        // 速度回落至峰值比例以下判定随挥结束
   endHoldSec: 0.15,      // 需持续低于该比例的时间
-  cooldownSec: 1.2,      // 两次评分之间的冷却
+  cooldownSec: 0.6,      // 两次评分之间的冷却（支持连续挥拍，峰值间隔通常>1s）
   minPeakSpeed: 1.6,     // 峰值速度下限（归一化坐标/秒），过滤走动噪音
   warmupSec: 1.5,        // 摄像头开启后的预热期，期间不触发
-  readyHoldSec: 0.8,     // 全身入镜且站定持续时间，满足后才允许检测挥拍
+  readyHoldSec: 0.8,     // 首次就位：全身入镜且站定持续时间（仅需一次，之后锁存）
+  armLostSec: 1.5,       // 人体丢失超过该时长后才解除就绪，回到首次就位流程
+  triggerRatio: 0.7,     // 上升沿触发：速度从阈值×该比例以下冲到阈值以上才算新挥拍
   maxHipDrift: 0.18,     // 挥拍段内髋部横移上限，超过判为走动/调整位置
 };
 
@@ -437,16 +439,18 @@ async function runUpload(file, actionReq, uid){
      回落至 45% 以下并持续 0.15s 即判定随挥结束，立刻截取 [峰值-0.8s, 峰值+0.6s]
      送入 DTW 比对。119 个模板 ×2 镜像 ×6 关节的 DTW 总量为毫秒级，
      从随挥结束到出分通常 < 200ms。
-   - 防误触发（就绪门控）：全身核心点（肩/髋/膝）可见且髋部站定 0.8s 后
-     才允许检测；触发前 0.2~0.7s 需相对安静（区分"引拍前准备"与"一直在动"）；
+   - 防误触发（就绪门控）：首次检测前需全身核心点（肩/髋/膝）可见且髋部
+     站定 0.8s，之后锁存"已就位"，人体丢失 1.5s 以上才解除；连续挥拍通过
+     速度上升沿触发（两次挥拍间速度自然回落），无需每次重新站定；
      评分前检查段内髋部横移，走动/调整位置不计分。 */
 let liveStream = null, liveRunning = false, liveLastVideoTime = -1;
 let liveFacing = "user";          // user=前置(自拍镜像) / environment=后置
 let liveBuf = [];                 // [{t, lm, angles}]
 let liveState = "idle", livePeakV = 0, livePeakT = 0, liveBelowSince = 0, liveCooldownUntil = 0;
 let liveSpeeds = [];              // 近期平滑速度，用于动态阈值
-let liveSpeedHist = [];           // [{t,v}] 触发前安静期判定用
-let liveReadySince = 0, liveStartT = 0;   // 就绪门控
+let liveReadySince = 0, liveStartT = 0;   // 就绪门控（首次就位）
+let liveArmed = false, liveLastSeenT = 0; // 就绪锁存：一旦就位，人体不丢失就一直保持
+let livePrevV = 0;                        // 上一帧速度，上升沿触发用
 let livePrevElbow = null, liveFpsT = 0, liveFpsN = 0;
 
 const SKELETON = [   // 骨骼连线（肩/肘/腕/髋/膝/踝）
@@ -456,7 +460,8 @@ const SKELETON = [   // 骨骼连线（肩/肘/腕/髋/膝/踝）
 function liveReset(){
   liveBuf = []; liveState = "idle"; livePeakV = 0; livePeakT = 0;
   liveBelowSince = 0; liveCooldownUntil = 0; liveSpeeds = []; livePrevElbow = null;
-  liveSpeedHist = []; liveReadySince = 0; liveStartT = performance.now() / 1000;
+  liveReadySince = 0; liveStartT = performance.now() / 1000;
+  liveArmed = false; liveLastSeenT = 0; livePrevV = 0;
 }
 
 async function openCamera(facing){
@@ -582,49 +587,60 @@ function liveLoop(){
       liveFpsT = t; liveFpsN = 0;
     }
 
-    // 在线挥拍状态机（带"就绪门控"：全身入镜且站定 0.8s 后才允许触发，
-    // 避免架设备/走动/调整姿势时被误判为挥拍）
+    // 在线挥拍状态机（连续挥拍版）：
+    // - 首次就位需全身入镜且站定 0.8s（防止架设备/走动时误触发）；
+    // - 就位后锁存，只要人体不丢失超过 1.5s 就一直保持"已就位"，
+    //   之后每次挥拍用"速度上升沿"触发，无需再次站定/安静，支持连续多球。
     const v = liveElbowSpeed(frame, livePrevElbow);
     livePrevElbow = frame;
     if (v > 0){
       liveSpeeds.push(v);
       if (liveSpeeds.length > 120) liveSpeeds.shift();
     }
-    // 就绪判定：肩髋膝六个核心点都可见，且髋部移动速度低于阈值（站定）
-    let ready = false;
-    if (lm && [11,12,23,24,25,26].every(i => lm[i].visibility > 0.5) &&
-        liveBuf.length >= 2){
-      const prevLm = liveBuf[liveBuf.length-2].lm;
-      if (prevLm && prevLm[23].visibility > 0.5 && prevLm[24].visibility > 0.5){
-        const hx = (lm[23].x+lm[24].x)/2, hy = (lm[23].y+lm[24].y)/2;
-        const px = (prevLm[23].x+prevLm[24].x)/2, py = (prevLm[23].y+prevLm[24].y)/2;
-        const hv = Math.hypot(hx-px, hy-py) /
-                   Math.max(1e-3, t - liveBuf[liveBuf.length-2].t);
-        ready = hv < 0.3;
-      }
+    // 人体存在判定（肩肘可见即可，连续挥拍中不要求全身静止）
+    const personHere = lm && [11,12,13,14].every(i => lm[i].visibility > 0.5);
+    if (personHere) liveLastSeenT = t;
+    if (liveArmed && t - liveLastSeenT > LIVE.armLostSec){
+      liveArmed = false; liveReadySince = 0;   // 人走了，回到首次就位流程
     }
-    if (ready){ if (!liveReadySince) liveReadySince = t; }
-    else liveReadySince = 0;
-    const armed = liveReadySince > 0 &&
-                  (t - liveReadySince >= LIVE.readyHoldSec) &&
-                  (t - liveStartT >= LIVE.warmupSec);
+    // 首次就位判定：肩髋膝六个核心点都可见，且髋部移动速度低于阈值（站定）
+    if (!liveArmed){
+      let ready = false;
+      if (lm && [11,12,23,24,25,26].every(i => lm[i].visibility > 0.5) &&
+          liveBuf.length >= 2){
+        const prevLm = liveBuf[liveBuf.length-2].lm;
+        if (prevLm && prevLm[23].visibility > 0.5 && prevLm[24].visibility > 0.5){
+          const hx = (lm[23].x+lm[24].x)/2, hy = (lm[23].y+lm[24].y)/2;
+          const px = (prevLm[23].x+prevLm[24].x)/2, py = (prevLm[23].y+prevLm[24].y)/2;
+          const hv = Math.hypot(hx-px, hy-py) /
+                     Math.max(1e-3, t - liveBuf[liveBuf.length-2].t);
+          ready = hv < 0.3;
+        }
+      }
+      if (ready){ if (!liveReadySince) liveReadySince = t; }
+      else liveReadySince = 0;
+      if (liveReadySince > 0 &&
+          t - liveReadySince >= LIVE.readyHoldSec &&
+          t - liveStartT >= LIVE.warmupSec){
+        liveArmed = true;
+      }
+      var readyHint = !lm ? "未检测到人体，请站入画面"
+        : (ready ? "保持站定…" : "请退后站定，全身入镜后即可开始");
+    }
+    const armed = liveArmed;
     const th = liveThreshold();
     if (t < liveCooldownUntil){
       // 冷却中
     } else if (liveState === "idle"){
       if (!armed){
-        $("liveStatus").textContent = !lm ? "未检测到人体，请站入画面"
-          : (ready ? "保持站定…" : "请退后站定，全身入镜后再挥拍");
-      } else if (v > th){
-        // 触发前 0.2~0.7s 应相对安静（引拍前是静止准备，而不是一直在动）
-        const calm = liveSpeedHist.filter(s => s.t >= t-0.7 && s.t <= t-0.2);
-        const calmMean = calm.length ? calm.reduce((a,b)=>a+b.v,0)/calm.length : 0;
-        if (calmMean < Math.max(0.5, th*0.5)){
-          liveState = "swing"; livePeakV = v; livePeakT = t; liveBelowSince = 0;
-          $("liveStatus").textContent = "检测到挥拍…";
-        }
+        $("liveStatus").textContent = readyHint;
+      } else if (v > th && livePrevV <= th * LIVE.triggerRatio){
+        // 上升沿触发：速度刚从低位冲过阈值才算新一次挥拍，
+        // 连续动作中两次挥拍之间速度自然回落，无需人为站定等待
+        liveState = "swing"; livePeakV = v; livePeakT = t; liveBelowSince = 0;
+        $("liveStatus").textContent = "检测到挥拍…";
       } else {
-        $("liveStatus").textContent = "已就位，等待挥拍…";
+        $("liveStatus").textContent = "已就位，可连续挥拍…";
       }
     } else { // swing
       if (v > livePeakV){ livePeakV = v; livePeakT = t; liveBelowSince = 0; }
@@ -637,11 +653,7 @@ function liveLoop(){
         }
       } else liveBelowSince = 0;
     }
-    if (v > 0){
-      liveSpeedHist.push({t, v});
-      while (liveSpeedHist.length && liveSpeedHist[0].t < t - LIVE.bufferSec)
-        liveSpeedHist.shift();
-    }
+    livePrevV = personHere ? v : 0;
 
     drawSkeleton(lm, cam.videoWidth, cam.videoHeight);
   }
@@ -777,7 +789,7 @@ $("btnCamFlip").onclick = async ()=>{
     liveReset();
     liveRunning = true;   // openCamera 不改动 liveRunning，重置状态机即可
     $("liveStatus").textContent = "已切换到" +
-      (liveFacing === "user" ? "前置" : "后置") + "镜头，请站定后开始挥拍";
+      (liveFacing === "user" ? "前置" : "后置") + "镜头，站定一次即可，之后可连续挥拍";
   } catch (e) {
     console.error(e);
     $("liveStatus").textContent = "镜头切换失败：" + (e.message || e);
