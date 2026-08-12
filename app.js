@@ -319,6 +319,8 @@ async function initModel(){
     fileset = await vision.FilesetResolver.forVisionTasks(`${CDN}/wasm`);
     const MODEL_URLS = [
       "https://cdn.jsdelivr.net/gh/New-Life-xin/TT-coach@main/assets/pose_landmarker_full.task",
+      "https://fastly.jsdelivr.net/gh/New-Life-xin/TT-coach@main/assets/pose_landmarker_full.task",
+      "https://gcore.jsdelivr.net/gh/New-Life-xin/TT-coach@main/assets/pose_landmarker_full.task",
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
     ];
     let buf = null, lastErr = null;
