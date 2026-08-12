@@ -441,6 +441,7 @@ async function runUpload(file, actionReq, uid){
      才允许检测；触发前 0.2~0.7s 需相对安静（区分"引拍前准备"与"一直在动"）；
      评分前检查段内髋部横移，走动/调整位置不计分。 */
 let liveStream = null, liveRunning = false, liveLastVideoTime = -1;
+let liveFacing = "user";          // user=前置(自拍镜像) / environment=后置
 let liveBuf = [];                 // [{t, lm, angles}]
 let liveState = "idle", livePeakV = 0, livePeakT = 0, liveBelowSince = 0, liveCooldownUntil = 0;
 let liveSpeeds = [];              // 近期平滑速度，用于动态阈值
@@ -458,6 +459,19 @@ function liveReset(){
   liveSpeedHist = []; liveReadySince = 0; liveStartT = performance.now() / 1000;
 }
 
+async function openCamera(facing){
+  if (liveStream){ liveStream.getTracks().forEach(t=>t.stop()); liveStream = null; }
+  liveStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: facing },
+    audio: false });
+  const cam = $("cam");
+  // 前置自拍镜像显示（符合直觉），后置正常显示
+  cam.style.transform = facing === "user" ? "scaleX(-1)" : "none";
+  cam.srcObject = liveStream;
+  await new Promise(res => { cam.onloadedmetadata = res; });
+  await cam.play();
+}
+
 async function startLive(){
   // iOS 兼容性要点：
   // 1) getUserMedia 必须在用户点击后的"激活窗口"内发起——iOS Safari 中
@@ -470,12 +484,10 @@ async function startLive(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
     throw new Error("当前浏览器不支持摄像头调用。iPhone 请用 Safari 直接打开本页面" +
                     "（不要在微信或「文件」App 内打开）；电脑请用最新版 Chrome / Edge");
-  const camPromise = navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-    audio: false });
+  const camPromise = openCamera(liveFacing);
   const modelPromise = initModel();
   try {
-    liveStream = await camPromise;
+    await camPromise;
   } catch (e) {
     if (e && (e.name === "NotAllowedError" || e.name === "SecurityError"))
       throw new Error("摄像头权限被拒绝。iPhone：弹窗中点「允许」；" +
@@ -485,11 +497,8 @@ async function startLive(){
     throw e;
   }
   await modelPromise;
-  const cam = $("cam");
-  cam.srcObject = liveStream;
-  await new Promise(res => { cam.onloadedmetadata = res; });
-  await cam.play();
   $("camwrap").style.display = "block";
+  $("btnCamFlip").style.display = "inline-block";
   liveReset();
   liveRunning = true;
   $("liveStatus").textContent = "请退后站定，全身入镜后即可开始挥拍";
@@ -500,6 +509,7 @@ function stopLive(){
   liveRunning = false;
   if (liveStream){ liveStream.getTracks().forEach(t=>t.stop()); liveStream = null; }
   $("camwrap").style.display = "none";
+  $("btnCamFlip").style.display = "none";
   $("liveStatus").textContent = "摄像头已关闭";
 }
 
@@ -508,13 +518,15 @@ function drawSkeleton(lm, w, h){
   if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
   ctx.clearRect(0,0,w,h);
   if (!lm) return;
+  const mirror = liveFacing === "user";   // 前置镜像显示，后置正常
+  const X = p => (mirror ? 1-p.x : p.x) * w;
   ctx.strokeStyle = "#00e676"; ctx.lineWidth = 3;
   for (const [a,b] of SKELETON){
     const pa = lm[a], pb = lm[b];
     if (pa.visibility < 0.5 || pb.visibility < 0.5) continue;
     ctx.beginPath();
-    ctx.moveTo((1-pa.x)*w, pa.y*h);   // 镜像显示，与自拍视角一致
-    ctx.lineTo((1-pb.x)*w, pb.y*h);
+    ctx.moveTo(X(pa), pa.y*h);
+    ctx.lineTo(X(pb), pb.y*h);
     ctx.stroke();
   }
   ctx.fillStyle = "#ff5252";
@@ -522,7 +534,7 @@ function drawSkeleton(lm, w, h){
     const p = lm[idx];
     if (p.visibility < 0.5) continue;
     ctx.beginPath();
-    ctx.arc((1-p.x)*w, p.y*h, 4, 0, Math.PI*2);
+    ctx.arc(X(p), p.y*h, 4, 0, Math.PI*2);
     ctx.fill();
   }
 }
@@ -754,4 +766,21 @@ $("btnLiveStop").onclick = ()=>{
   stopLive();
   $("btnLiveStop").style.display = "none";
   $("btnLiveStart").style.display = "block";
+};
+$("btnCamFlip").onclick = async ()=>{
+  if (!liveRunning) return;
+  $("btnCamFlip").disabled = true;
+  $("liveStatus").textContent = "正在切换镜头…";
+  try {
+    liveFacing = liveFacing === "user" ? "environment" : "user";
+    await openCamera(liveFacing);
+    liveReset();
+    liveRunning = true;   // openCamera 不改动 liveRunning，重置状态机即可
+    $("liveStatus").textContent = "已切换到" +
+      (liveFacing === "user" ? "前置" : "后置") + "镜头，请站定后开始挥拍";
+  } catch (e) {
+    console.error(e);
+    $("liveStatus").textContent = "镜头切换失败：" + (e.message || e);
+  }
+  $("btnCamFlip").disabled = false;
 };
