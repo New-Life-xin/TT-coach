@@ -84,7 +84,10 @@ const LIVE = {
   endRatio: 0.45,        // 速度回落至峰值比例以下判定随挥结束
   endHoldSec: 0.15,      // 需持续低于该比例的时间
   cooldownSec: 1.2,      // 两次评分之间的冷却
-  minPeakSpeed: 1.2,     // 峰值速度下限（归一化坐标/秒），过滤走动噪音
+  minPeakSpeed: 1.6,     // 峰值速度下限（归一化坐标/秒），过滤走动噪音
+  warmupSec: 1.5,        // 摄像头开启后的预热期，期间不触发
+  readyHoldSec: 0.8,     // 全身入镜且站定持续时间，满足后才允许检测挥拍
+  maxHipDrift: 0.18,     // 挥拍段内髋部横移上限，超过判为走动/调整位置
 };
 
 const TEMPLATES = JSON.parse(document.getElementById("tpl-data").textContent);
@@ -432,12 +435,17 @@ async function runUpload(file, actionReq, uid){
    - 推理在 requestAnimationFrame 循环内同步完成，不做网络往返，帧到结果零等待。
    - 在线维护 3s 滚动缓冲与肘部速度状态机：超过动态阈值→跟踪峰值→
      回落至 45% 以下并持续 0.15s 即判定随挥结束，立刻截取 [峰值-0.8s, 峰值+0.6s]
-     送入 DTW 比对。71 个模板 ×2 镜像 ×6 关节的 DTW 总量为毫秒级，
-     从随挥结束到出分通常 < 200ms。 */
+     送入 DTW 比对。119 个模板 ×2 镜像 ×6 关节的 DTW 总量为毫秒级，
+     从随挥结束到出分通常 < 200ms。
+   - 防误触发（就绪门控）：全身核心点（肩/髋/膝）可见且髋部站定 0.8s 后
+     才允许检测；触发前 0.2~0.7s 需相对安静（区分"引拍前准备"与"一直在动"）；
+     评分前检查段内髋部横移，走动/调整位置不计分。 */
 let liveStream = null, liveRunning = false, liveLastVideoTime = -1;
 let liveBuf = [];                 // [{t, lm, angles}]
 let liveState = "idle", livePeakV = 0, livePeakT = 0, liveBelowSince = 0, liveCooldownUntil = 0;
 let liveSpeeds = [];              // 近期平滑速度，用于动态阈值
+let liveSpeedHist = [];           // [{t,v}] 触发前安静期判定用
+let liveReadySince = 0, liveStartT = 0;   // 就绪门控
 let livePrevElbow = null, liveFpsT = 0, liveFpsN = 0;
 
 const SKELETON = [   // 骨骼连线（肩/肘/腕/髋/膝/踝）
@@ -447,6 +455,7 @@ const SKELETON = [   // 骨骼连线（肩/肘/腕/髋/膝/踝）
 function liveReset(){
   liveBuf = []; liveState = "idle"; livePeakV = 0; livePeakT = 0;
   liveBelowSince = 0; liveCooldownUntil = 0; liveSpeeds = []; livePrevElbow = null;
+  liveSpeedHist = []; liveReadySince = 0; liveStartT = performance.now() / 1000;
 }
 
 async function startLive(){
@@ -483,7 +492,7 @@ async function startLive(){
   $("camwrap").style.display = "block";
   liveReset();
   liveRunning = true;
-  $("liveStatus").textContent = "等待挥拍…（全身入镜，侧面朝镜头效果最佳）";
+  $("liveStatus").textContent = "请退后站定，全身入镜后即可开始挥拍";
   requestAnimationFrame(liveLoop);
 }
 
@@ -561,20 +570,49 @@ function liveLoop(){
       liveFpsT = t; liveFpsN = 0;
     }
 
-    // 在线挥拍状态机
+    // 在线挥拍状态机（带"就绪门控"：全身入镜且站定 0.8s 后才允许触发，
+    // 避免架设备/走动/调整姿势时被误判为挥拍）
     const v = liveElbowSpeed(frame, livePrevElbow);
     livePrevElbow = frame;
     if (v > 0){
       liveSpeeds.push(v);
       if (liveSpeeds.length > 120) liveSpeeds.shift();
     }
+    // 就绪判定：肩髋膝六个核心点都可见，且髋部移动速度低于阈值（站定）
+    let ready = false;
+    if (lm && [11,12,23,24,25,26].every(i => lm[i].visibility > 0.5) &&
+        liveBuf.length >= 2){
+      const prevLm = liveBuf[liveBuf.length-2].lm;
+      if (prevLm && prevLm[23].visibility > 0.5 && prevLm[24].visibility > 0.5){
+        const hx = (lm[23].x+lm[24].x)/2, hy = (lm[23].y+lm[24].y)/2;
+        const px = (prevLm[23].x+prevLm[24].x)/2, py = (prevLm[23].y+prevLm[24].y)/2;
+        const hv = Math.hypot(hx-px, hy-py) /
+                   Math.max(1e-3, t - liveBuf[liveBuf.length-2].t);
+        ready = hv < 0.3;
+      }
+    }
+    if (ready){ if (!liveReadySince) liveReadySince = t; }
+    else liveReadySince = 0;
+    const armed = liveReadySince > 0 &&
+                  (t - liveReadySince >= LIVE.readyHoldSec) &&
+                  (t - liveStartT >= LIVE.warmupSec);
     const th = liveThreshold();
     if (t < liveCooldownUntil){
       // 冷却中
     } else if (liveState === "idle"){
-      if (v > th){
-        liveState = "swing"; livePeakV = v; livePeakT = t; liveBelowSince = 0;
-        $("liveStatus").textContent = "检测到挥拍…";
+      if (!armed){
+        $("liveStatus").textContent = !lm ? "未检测到人体，请站入画面"
+          : (ready ? "保持站定…" : "请退后站定，全身入镜后再挥拍");
+      } else if (v > th){
+        // 触发前 0.2~0.7s 应相对安静（引拍前是静止准备，而不是一直在动）
+        const calm = liveSpeedHist.filter(s => s.t >= t-0.7 && s.t <= t-0.2);
+        const calmMean = calm.length ? calm.reduce((a,b)=>a+b.v,0)/calm.length : 0;
+        if (calmMean < Math.max(0.5, th*0.5)){
+          liveState = "swing"; livePeakV = v; livePeakT = t; liveBelowSince = 0;
+          $("liveStatus").textContent = "检测到挥拍…";
+        }
+      } else {
+        $("liveStatus").textContent = "已就位，等待挥拍…";
       }
     } else { // swing
       if (v > livePeakV){ livePeakV = v; livePeakT = t; liveBelowSince = 0; }
@@ -587,6 +625,11 @@ function liveLoop(){
         }
       } else liveBelowSince = 0;
     }
+    if (v > 0){
+      liveSpeedHist.push({t, v});
+      while (liveSpeedHist.length && liveSpeedHist[0].t < t - LIVE.bufferSec)
+        liveSpeedHist.shift();
+    }
 
     drawSkeleton(lm, cam.videoWidth, cam.videoHeight);
   }
@@ -595,15 +638,22 @@ function liveLoop(){
 
 function liveScore(nowT){
   // 截取 [峰值-0.8s, 峰值+0.6s]（缓冲内取交集）
-  const segFrames = liveBuf.filter(f => f.t >= livePeakT - LIVE.preSec &&
-                                        f.t <= Math.min(livePeakT + LIVE.postSec, nowT) && f.lm);
+  const winAll = liveBuf.filter(f => f.t >= livePeakT - LIVE.preSec && f.t <= nowT);
+  const segFrames = winAll.filter(f => f.lm && f.t <= Math.min(livePeakT + LIVE.postSec, nowT));
   const minLen = 8;
   if (segFrames.length < minLen){
     $("liveStatus").textContent = "本次挥拍有效帧不足，请退后一步确保全身入镜";
     return;
   }
-  const det = segFrames.length / Math.max(1,
-      liveBuf.filter(f => f.t >= livePeakT - LIVE.preSec && f.t <= nowT).length);
+  // 质量门控（与离线分割一致）：段内髋部横移过大视为走动/调整位置，不计分
+  const hips = segFrames
+    .filter(f => f.lm[LM.left_hip].visibility > 0.5)
+    .map(f => f.lm[LM.left_hip].x);
+  if (hips.length > 5 && Math.max(...hips) - Math.min(...hips) > LIVE.maxHipDrift){
+    $("liveStatus").textContent = "检测到身体移动（非有效挥拍），请站稳后再挥";
+    return;
+  }
+  const det = segFrames.length / Math.max(1, winAll.length);
   const t0 = performance.now();
   const uid = $("uid").value.trim() || "guest";
   const angles = segFrames.map(f => f.angles);
