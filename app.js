@@ -223,7 +223,8 @@ function segment(frames) {   // frames: [{t, lm|null, angles}]
     if (hips.length>5 && Math.max(...hips)-Math.min(...hips) > 0.15) continue;
     segs.push({ peakIdx:p, peakTime:+ts[p].toFixed(2), peakSpeed:+sm[p].toFixed(3),
                 detRate:+det.toFixed(2),
-                angles: seg.filter(f=>f.lm).map(f=>f.angles) });
+                angles: seg.filter(f=>f.lm).map(f=>f.angles),
+                lms: seg.filter(f=>f.lm).map(f=>f.lm) });
     lastEnd = e;
   }
   return segs;
@@ -368,12 +369,51 @@ async function initModel(){
    准确标注的示范动作段，并纠正 2 个高置信错标），留一法交叉验证
    判别准确率 95.8%。此处额外输出判别置信度（正反手最佳分之差），
    分差过小时提示用户可手动指定动作类型。 */
-function bestMatch(segAngles, actionReq){
+/* 视角与持拍手判定（2026-08 新增）：
+   标准库模板全部为背面拍摄，MediaPipe 输出的是人体解剖学左右（与拍摄方向无关），
+   而 2D 关节角随视角镜像——正面拍摄右手球员时，角度序列恰好像"背面左手"，
+   旧逻辑仅靠镜像匹配胜负推断持拍手，会把右手误判为左手。
+   解决方案：
+   - 视角：正面拍摄时鼻/眼关键点可见，背面拍摄时被头部遮挡 → 用面部点可见度区分；
+   - 持拍手：挥拍段内哪侧手腕速度积分大，哪侧就是持拍手（与视角无关，天然可靠）；
+   - 两者结合推出"应有的镜像状态"（右手+正面 或 左手+背面 ⇒ 需要镜像对齐模板），
+     并在匹配备忘中锁定该镜像方向，避免正反手因镜像歧义被翻转。 */
+function analyzeViewAndHand(lms){   // lms: 段内有检出的帧的 landmarks 数组
+  let faceSum = 0, faceN = 0;
+  const spd = { left: 0, right: 0 };
+  for (let i = 0; i < lms.length; i++){
+    const lm = lms[i];
+    for (const f of [0, 2, 5]){ faceSum += lm[f].visibility; faceN++; }  // 鼻、双眼
+    if (i > 0){
+      const p = lms[i-1];
+      for (const [side, w] of [["left",15],["right",16]]){
+        if (lm[w].visibility > 0.5 && p[w].visibility > 0.5)
+          spd[side] += Math.hypot(lm[w].x-p[w].x, lm[w].y-p[w].y);
+      }
+    }
+  }
+  const faceVis = faceN ? faceSum/faceN : 0;
+  const view = faceVis > 0.55 ? "front" : faceVis < 0.35 ? "back" : null;
+  let hand = null;
+  const tot = spd.left + spd.right;
+  if (tot > 1e-6){
+    if (spd.right > spd.left * 1.25) hand = "right";
+    else if (spd.left > spd.right * 1.25) hand = "left";
+  }
+  // 模板=背面+右手 ⇒ 需镜像当且仅当 (右手且正面) 或 (左手且背面)
+  let mirrorLock = null;
+  if (view && hand) mirrorLock = (hand === "right") === (view === "front");
+  return { view, hand, mirrorLock, faceVis: +faceVis.toFixed(2) };
+}
+
+function bestMatch(segAngles, actionReq, mirrorLock){
   const actions = actionReq==="自动" ? ["正手攻球","反手攻球"] : [actionReq];
   let best = null; const bestByAct = {};
+  const mirrorOpts = (mirrorLock === null || mirrorLock === undefined)
+    ? [false, true] : [mirrorLock];
   for (const act of actions){
     const tpls = TEMPLATES.filter(t=>t.action===act);
-    for (const mirrored of [false, true]){
+    for (const mirrored of mirrorOpts){
       const ua = mirrored ? mirrorAngles(segAngles) : segAngles;
       for (const tpl of tpls){
         const r = scoreSeq(ua, tpl.angles, SCORE_K);   // 固定 k，不随段位变化
@@ -424,10 +464,11 @@ async function runUpload(file, actionReq, uid){
   const segs = segment(frames);
   if (!segs.length) throw new Error("未能检出有效击球动作，请确认视频包含完整的挥拍动作");
   const seg = segs.reduce((a,b)=> a.peakSpeed>=b.peakSpeed?a:b);
-  const bm = bestMatch(seg.angles, actionReq);
+  const vh = analyzeViewAndHand(seg.lms);
+  const bm = bestMatch(seg.angles, actionReq, vh.mirrorLock);
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
-  return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf };
+  return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf, vh };
 }
 
 // ---------- 实时摄像头评分 ----------
@@ -681,25 +722,32 @@ function liveScore(nowT){
   const t0 = performance.now();
   const uid = $("uid").value.trim() || "guest";
   const angles = segFrames.map(f => f.angles);
-  const bm = bestMatch(angles, $("action").value);
+  const vh = analyzeViewAndHand(segFrames.map(f => f.lm));
+  const bm = bestMatch(angles, $("action").value, vh.mirrorLock);
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const ms = Math.round(performance.now() - t0);
-  showResult({ r, act, tpl, mirrored, conf: bm.conf,
+  showResult({ r, act, tpl, mirrored, conf: bm.conf, vh,
                seg: { peakTime: (livePeakT % 3600).toFixed(2), detRate: det },
                ladder, liveMs: ms });
   $("liveStatus").textContent = `上一次挥拍 ${r.score} 分（${ms}ms 出分），继续挥拍可再次评分`;
 }
 
 // ---------- 结果展示（上传 / 实时共用） ----------
-function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf }){
+function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh }){
   $("score").textContent = r.score;
   $("grade").textContent = r.score>=85?"优秀":r.score>=70?"良好":r.score>=55?"及格":"需加强";
+  // 持拍手以手腕速度实测为准（与拍摄方向无关），视角用面部点可见度判定
+  const handViewTxt = (vh && vh.hand)
+    ? ` ｜ ${vh.hand==="right"?"右手":"左手"}持拍` +
+      (vh.view ? `·${vh.view==="front"?"正面":"背面"}拍摄` : "") +
+      (mirrored ? "（已镜像对齐模板）" : "")
+    : (mirrored ? " ｜ 已镜像对齐模板" : "");
   $("meta").innerHTML =
     `匹配动作：<b>${act}</b> ｜ 最佳匹配模板：${tpl.athlete}（#${tpl.id} · ${tpl.level}）`+
     (conf?` ｜ 正反手判别置信度：<b>${conf}</b>`+(conf==="低"?"（正反手模板分差过小，如与实际不符请手动指定动作类型）":""):"")+`<br>`+
     `击球峰值 @${seg.peakTime}s ｜ 段检出率 ${(seg.detRate*100).toFixed(0)}%`+
-    (mirrored?" ｜ 检测到左手持拍，已镜像处理":"")+
+    handViewTxt+
     (liveMs!==undefined?` ｜ 实时评分耗时 ${liveMs}ms`:"");
   $("joints").innerHTML = JOINTS.map(j=>{
     const d = r.joint_detail[j];
