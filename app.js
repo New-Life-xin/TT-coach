@@ -224,10 +224,78 @@ function segment(frames) {   // frames: [{t, lm|null, angles}]
     segs.push({ peakIdx:p, peakTime:+ts[p].toFixed(2), peakSpeed:+sm[p].toFixed(3),
                 detRate:+det.toFixed(2),
                 angles: seg.filter(f=>f.lm).map(f=>f.angles),
-                lms: seg.filter(f=>f.lm).map(f=>f.lm) });
+                lms: seg.filter(f=>f.lm).map(f=>f.lm),
+                frames: seg.map(f => ({ t: f.t, lm: f.lm })) });
     lastEnd = e;
   }
   return segs;
+}
+
+// ---------- 发力方式（身体带动 vs 甩手臂）----------
+/* 归一化近端速度 = 段内肩/髋峰值速度 / 躯干长（单位「躯干长/秒」）。
+   肩/髋是「近端」关节：速度越小越接近绕稳定轴旋转（身体带动、放松高效），
+   越大越「甩手臂」（近端平移大）。离线留一验证 ρ=+0.84，比形态 DTW(+0.55) 强，
+   故作为独立第二维展示（主分仍为形态 DTW，此处不重定标）。 */
+function jointSpeed(frames, idx){   // frames: [{t, lm}]，lm 为 MediaPipe 33 点
+  const n = frames.length;
+  if (n < 3) return [];
+  const xs = frames.map(f => (f.lm && f.lm[idx].visibility > 0.5) ? f.lm[idx].x : NaN);
+  const ys = frames.map(f => (f.lm && f.lm[idx].visibility > 0.5) ? f.lm[idx].y : NaN);
+  let last = NaN;
+  for (let i = 0; i < n; i++){ if (!isNaN(xs[i])) last = xs[i]; else xs[i] = last; }
+  for (let i = n - 1; i >= 0; i--){ if (!isNaN(xs[i])) last = xs[i]; else xs[i] = last; }
+  let lastY = NaN;
+  for (let i = 0; i < n; i++){ if (!isNaN(ys[i])) lastY = ys[i]; else ys[i] = lastY; }
+  for (let i = n - 1; i >= 0; i--){ if (!isNaN(ys[i])) lastY = ys[i]; else ys[i] = lastY; }
+  // 中心差分速度（与 Python joint_speed 的 np.gradient 等效），dt 用真实时间戳差
+  const sp = new Array(n).fill(0);
+  for (let i = 0; i < n; i++){
+    const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
+    const dt = (frames[i1].t - frames[i0].t) || 1e-3;
+    sp[i] = Math.hypot((xs[i1] - xs[i0]) / dt, (ys[i1] - ys[i0]) / dt);
+  }
+  // 5 帧移动平均平滑（np.convolve mode=same 的等价）
+  const sm = new Array(n).fill(0);
+  for (let i = 0; i < n; i++){
+    let s = 0, c = 0;
+    for (let j = i - 2; j <= i + 2; j++){ if (j >= 0 && j < n){ s += sp[j]; c++; } }
+    sm[i] = s / c;
+  }
+  return sm;
+}
+
+function bodyScale(frames){   // 躯干长中位数（双肩中点 ~ 双髋中点）
+  const vals = [];
+  for (const f of frames){
+    const p = f.lm;
+    if (!p || Math.min(p[11].visibility, p[12].visibility,
+                       p[23].visibility, p[24].visibility) < 0.5) continue;
+    const shx = (p[11].x + p[12].x) / 2, shy = (p[11].y + p[12].y) / 2;
+    const hpx = (p[23].x + p[24].x) / 2, hpy = (p[23].y + p[24].y) / 2;
+    vals.push(Math.hypot(shx - hpx, shy - hpy));
+  }
+  vals.sort((a, b) => a - b);
+  return vals.length ? vals[Math.floor(vals.length / 2)] : 1.0;
+}
+
+function forceFeatures(frames, hand){   // hand: 'right'|'left'（持拍手）
+  const side = hand === 'left' ? { sh: 11, hip: 23 } : { sh: 12, hip: 24 };
+  const shSp = jointSpeed(frames, side.sh);
+  const hipSp = jointSpeed(frames, side.hip);
+  const scale = bodyScale(frames);
+  const shN = shSp.length ? Math.max(...shSp) / scale : 0;
+  const hipN = hipSp.length ? Math.max(...hipSp) / scale : 0;
+  const avg = (shN + hipN) / 2;
+  const rating = avg <= 1.2 ? "身体带动充分" : avg >= 2.8 ? "偏向甩手臂" : "发力方式居中";
+  return { shN, hipN, avg, rating };
+}
+
+function forceTipText(rating){
+  if (rating === "身体带动充分")
+    return "肩/髋近端速度低，说明主要靠转体与重心转移带动挥拍，而非甩手臂——发力方式高效。";
+  if (rating === "偏向甩手臂")
+    return "肩/髋近端速度偏高，提示较多靠手臂发力、身体参与不足。建议先转体、用腰腹带动，再顺势挥臂。";
+  return "发力方式居中：身体与手臂均有参与，可进一步强化「先转体、再挥臂」的发力顺序。";
 }
 
 // ---------- 段位成长（localStorage，只记录成长，不影响评分严格度） ----------
@@ -361,7 +429,7 @@ async function initModel(){
     minTrackingConfidence: 0.5 });
   try { landmarker = await vision.PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
   catch(e) { landmarker = await vision.PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
-  setStatus("模型就绪 ✔");
+  setStatus("模型就绪");
 }
 
 // ---------- 评分：与标准库多模板比对取最佳 ----------
@@ -468,7 +536,8 @@ async function runUpload(file, actionReq, uid){
   const bm = bestMatch(seg.angles, actionReq, vh.mirrorLock);
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
-  return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf, vh };
+  const force = forceFeatures(seg.frames, (vh.hand || "right"));
+  return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf, vh, force };
 }
 
 // ---------- 实时摄像头评分 ----------
@@ -726,15 +795,16 @@ function liveScore(nowT){
   const bm = bestMatch(angles, $("action").value, vh.mirrorLock);
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
+  const force = forceFeatures(segFrames, (vh.hand || "right"));
   const ms = Math.round(performance.now() - t0);
   showResult({ r, act, tpl, mirrored, conf: bm.conf, vh,
                seg: { peakTime: (livePeakT % 3600).toFixed(2), detRate: det },
-               ladder, liveMs: ms });
+               ladder, liveMs: ms, force });
   $("liveStatus").textContent = `上一次挥拍 ${r.score} 分（${ms}ms 出分），继续挥拍可再次评分`;
 }
 
 // ---------- 结果展示（上传 / 实时共用） ----------
-function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh }){
+function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh, force }){
   $("score").textContent = r.score;
   $("grade").textContent = r.score>=85?"优秀":r.score>=70?"良好":r.score>=55?"及格":"需加强";
   // 持拍手以手腕速度实测为准（与拍摄方向无关），视角用面部点可见度判定
@@ -755,14 +825,30 @@ function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh }){
       <span>${d.joint_score}分（偏差${d.mean_deviation_deg}°）</span></div>
       <div class="bar"><i style="width:${d.joint_score}%"></i></div></div>`;
   }).join("");
-  $("feedback").textContent = "💡 " + generateFeedback(r);
+  $("feedback").textContent = generateFeedback(r);
+  // 发力方式维度（身体带动 vs 甩手臂）：独立第二维，主分不变
+  const fb = $("forcebox");
+  if (force && force.shN > 0){
+    fb.style.display = "block";
+    $("forceGrade").textContent = force.rating;
+    $("forceSh").textContent = force.shN.toFixed(2) + " 躯干长/秒";
+    $("forceHip").textContent = force.hipN.toFixed(2) + " 躯干长/秒";
+    $("forceShBar").style.width = Math.min(100, force.shN / 3 * 100) + "%";
+    $("forceHipBar").style.width = Math.min(100, force.hipN / 3 * 100) + "%";
+    let tip = forceTipText(force.rating);
+    if (act === "反手攻球") tip += "（反手标定样本较少，此评级以正手数据为参考。）";
+    $("forceTip").textContent = tip;
+  } else {
+    fb.style.display = "none";
+  }
   $("stage").textContent = "训练阶段 · " + ladder.tier +
     (ladder.sessions<=PLACEMENT?`（初始评估 ${ladder.sessions}/${PLACEMENT}）`:"");
   $("lp").textContent = "阶段进度 " + ladder.lp + "%";
   $("lpbar").style.width = ladder.lp + "%";
-  $("coaching").textContent = "🏋️ " + ladder.coaching;
+  $("coaching").textContent = ladder.coaching;
   $("coachbox").style.display = "block";
   $("result").style.display = "block";
+  $("result").classList.remove("show"); void $("result").offsetWidth; $("result").classList.add("show");
   $("result").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -785,7 +871,7 @@ drop.ondragover = e=>{e.preventDefault();drop.classList.add("on");};
 drop.ondragleave = ()=>drop.classList.remove("on");
 drop.ondrop = e=>{e.preventDefault();drop.classList.remove("on");file.files=e.dataTransfer.files;show();};
 file.onchange = show;
-function show(){ if(file.files[0]){ $("fname").textContent="📹 "+file.files[0].name; btn.disabled=false; } }
+function show(){ if(file.files[0]){ $("fname").textContent=file.files[0].name; btn.disabled=false; } }
 
 btn.onclick = async ()=>{
   btn.disabled = true;
@@ -794,11 +880,11 @@ btn.onclick = async ()=>{
   try {
     const out = await runUpload(file.files[0], $("action").value, uid);
     showResult(out);
-    setStatus("完成 ✔");
+    setStatus("完成");
   } catch(e){
     console.error(e);
     const el = $("err");
-    el.textContent = "❌ " + (e.message || e);
+    el.textContent = (e.message || e);
     el.style.display = "block";
     setStatus("");
   }
@@ -816,7 +902,7 @@ $("btnLiveStart").onclick = async ()=>{
   } catch(e){
     console.error(e);
     const el = $("err");
-    el.textContent = "❌ 摄像头启动失败：" + (e.message || e) +
+    el.textContent = "摄像头启动失败：" + (e.message || e) +
       "（请在浏览器地址栏允许摄像头权限）";
     el.style.display = "block";
   }
