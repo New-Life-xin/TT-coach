@@ -388,10 +388,18 @@ async function initModel(){
     // 手动 fetch 以便显示下载进度、避免"无网络连接"错觉。
     $("net").style.display = "block";
     setStatus("正在加载 AI 运行时...");
+    // 运行时优先走本站同源 assets/mp/（零跨域、可缓存），失败回退 jsDelivr CDN
     const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-    vision = await import(`${CDN}/+esm`);
-    fileset = await vision.FilesetResolver.forVisionTasks(`${CDN}/wasm`);
+    try {
+      vision = await import("./assets/mp/vision_bundle.mjs");
+      fileset = await vision.FilesetResolver.forVisionTasks("./assets/mp/wasm");
+    } catch (e) {
+      vision = await import(`${CDN}/+esm`);
+      fileset = await vision.FilesetResolver.forVisionTasks(`${CDN}/wasm`);
+    }
+    // 模型优先走本站同源（GitHub Pages 自带缓存），jsDelivr/googleapis 作回退
     const MODEL_URLS = [
+      "assets/pose_landmarker_full.task",
       "https://cdn.jsdelivr.net/gh/New-Life-xin/TT-coach@b2ff7ee3166f22326e535d2626bb99ffb10daf0b/assets/pose_landmarker_full.task",
       "https://fastly.jsdelivr.net/gh/New-Life-xin/TT-coach@b2ff7ee3166f22326e535d2626bb99ffb10daf0b/assets/pose_landmarker_full.task",
       "https://gcore.jsdelivr.net/gh/New-Life-xin/TT-coach@b2ff7ee3166f22326e535d2626bb99ffb10daf0b/assets/pose_landmarker_full.task",
