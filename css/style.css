@@ -1,0 +1,199 @@
+/* 乒乓球 AI 动作评分系统 · 样式（从 index.html 拆出，单文件版由 build_singlefile.py 重新内嵌） */
+  /* ===== 冠军卡风格 · 深色 + 金色 ===== */
+  :root {
+    color-scheme: dark;
+    --bg: #0e0e10;
+    --surface: rgba(21, 21, 27, .48);
+    --surface-2: rgba(29, 29, 37, .42);
+    --gold: #d4af37;
+    --gold-bright: #e6c465;
+    --gold-dim: #a8842a;
+    --text: #f4f1ea;
+    --text-dim: #b9b4ac;
+    --text-faint: #8b867f;
+    --line: rgba(212, 175, 55, .16);
+    --ok: #86c294;
+    --err: #e3a49c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex; justify-content: center;
+    padding: 40px 16px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* 背景氛围：冠军主题融入背景，无卡片元素 */
+  .bg-glow {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(58% 42% at 50% -2%, rgba(212, 175, 55, .11), transparent 70%),
+      radial-gradient(40% 32% at 90% 100%, rgba(212, 175, 55, .06), transparent 72%);
+  }
+  /* 冠军人物背景：4 张卡图全屏叠放，轮流淡入淡出 */
+  .bg-champion {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  }
+  .bg-champion img {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: center 30%;
+    opacity: 0;
+    filter: brightness(.85) saturate(1.02);
+    /* 由 JS 定时器均分轮播，保证每张图展示时间完全一致 */
+    transition: opacity 1s ease-in-out;
+  }
+  .bg-champion img.show { opacity: 1; }
+  .bg-champion::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(58% 42% at 50% -2%, rgba(212, 175, 55, .12), transparent 70%),
+      radial-gradient(40% 32% at 90% 100%, rgba(212, 175, 55, .07), transparent 72%);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bg-champion img { transition: none; }
+  }
+
+  @keyframes bgRotate { /* 已弃用：轮播改由 JS 均分计时 */ }
+
+  .card {
+    position: relative; z-index: 1;
+    background: linear-gradient(180deg, rgba(21, 21, 27, .42), rgba(14, 14, 16, .6));
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .04);
+    width: 100%; max-width: 720px; padding: 40px 36px; height: fit-content;
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .card { background: #15151b; }
+  }
+
+  h1 { font-size: 24px; font-weight: 700; color: var(--text);
+       text-align: center; letter-spacing: .02em; }
+  .sub { text-align: center; color: var(--text-faint); font-size: 13px;
+         margin: 10px 0 22px; line-height: 1.7; }
+  .sub::after { content: ""; display: block; width: 48px; height: 1px;
+                margin: 18px auto 0;
+                background: linear-gradient(90deg, transparent, var(--gold), transparent); }
+
+  .drop { border: 1px dashed rgba(212, 175, 55, .35); border-radius: 14px;
+          padding: 36px 20px; text-align: center; color: var(--text-dim);
+          background: var(--surface-2); cursor: pointer;
+          transition: border-color .2s, background .2s; }
+  .drop:hover, .drop.on { border-color: var(--gold); background: var(--surface); }
+  .drop p { margin-top: 8px; font-size: 13px; color: var(--text-faint); }
+
+  input[type=text], select { width: 100%; padding: 12px 14px; border: 1px solid var(--line);
+           border-radius: 10px; margin-top: 14px; font-size: 15px;
+           background: var(--surface-2); color: var(--text); }
+  input[type=text]::placeholder { color: var(--text-faint); }
+  input[type=text]:focus, select:focus, button:focus-visible {
+    outline: 1px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+
+  button { width: 100%; padding: 14px; border: 1px solid var(--gold); border-radius: 10px;
+           margin-top: 14px; background: var(--gold); color: #0e0e10;
+           font-size: 16px; font-weight: 600; cursor: pointer;
+           transition: background .2s, opacity .2s; }
+  button:hover { background: var(--gold-bright); }
+  button:disabled { background: var(--surface-2); color: var(--text-faint);
+                    border-color: var(--line); cursor: wait; }
+  button.danger { background: #7c3a35; border-color: #7c3a35; color: var(--text); }
+  button.danger:hover { background: #8f453f; }
+
+  #fname { margin-top: 10px; font-size: 14px; color: var(--gold); text-align: center; }
+  #status { margin-top: 14px; font-size: 13px; color: var(--text-faint);
+            text-align: center; min-height: 18px; }
+  #result { display: none; margin-top: 24px; }
+  #result.show { animation: fadeUp .5s cubic-bezier(.16, 1, .3, 1); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); }
+                       to { opacity: 1; transform: none; } }
+
+  .score-wrap { text-align: center; padding: 26px 20px;
+                background: linear-gradient(180deg, var(--surface-2), var(--surface));
+                border: 1px solid var(--line); border-radius: 14px; }
+  .score { font-size: 76px; font-weight: 800; color: var(--gold); line-height: 1;
+           font-variant-numeric: tabular-nums; }
+  .score small { font-size: 18px; color: var(--text-faint); font-weight: 400; }
+  .grade { display: inline-block; margin-top: 12px; padding: 5px 18px; border-radius: 999px;
+           font-size: 13px; font-weight: 700; color: #0e0e10; background: var(--gold); }
+  .meta { margin-top: 14px; font-size: 13px; color: var(--text-dim); line-height: 1.9; }
+  .meta b { color: var(--text); }
+
+  .joint { margin: 12px 0; }
+  .joint .lbl { display: flex; justify-content: space-between; font-size: 13px;
+                color: var(--text-dim); margin-bottom: 6px; }
+  .joint .lbl span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+  .bar { height: 4px; background: rgba(255, 255, 255, .06); border-radius: 2px;
+         overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 2px;
+           background: linear-gradient(90deg, var(--gold-dim), var(--gold-bright)); }
+
+  .feedback { margin-top: 16px; padding: 16px; background: rgba(212, 175, 55, .06);
+              border-left: 3px solid var(--gold); border-radius: 8px;
+              font-size: 14px; color: var(--text-dim); line-height: 1.8; }
+  #coachbox { display: none; margin-top: 16px; padding: 16px;
+              background: rgba(134, 194, 148, .06);
+              border-left: 3px solid var(--ok); border-radius: 8px; }
+  #coachbox .hd { display: flex; justify-content: space-between; font-size: 13px;
+              color: var(--ok); margin-bottom: 6px; }
+  #coaching { margin-top: 10px; font-size: 14px; color: var(--text-dim); line-height: 1.8; }
+  #forcebox { display: none; margin-top: 16px; padding: 16px;
+              background: rgba(212, 175, 55, .06);
+              border-left: 3px solid var(--gold-dim); border-radius: 8px; }
+  #forcebox h3 { margin: 0 0 10px; }
+  #forcebox .force-grade { display: inline-block; margin-bottom: 12px; padding: 4px 16px;
+              border-radius: 999px; font-size: 13px; font-weight: 700;
+              color: #0e0e10; background: var(--gold); }
+  #forcebox .force-tip { margin-top: 10px; font-size: 13px; color: var(--text-dim); line-height: 1.8; }
+  #diagbox { display: none; margin-top: 16px; padding: 16px;
+             background: rgba(227, 164, 156, .06);
+             border-left: 3px solid var(--err); border-radius: 8px; }
+  #diagbox h3 { margin: 0 0 10px; color: var(--err); }
+  #diagbox .diag-grade { display: inline-block; margin-bottom: 8px; padding: 4px 16px;
+             border-radius: 999px; font-size: 13px; font-weight: 700;
+             color: #0e0e10; background: var(--err); }
+  #diagbox .diag-grade.sev-mid { background: var(--gold); }
+  #diagbox .diag-grade.skip { color: var(--text-dim); background: var(--line); }
+  #diagbox .diag-chain { font-size: 13px; color: var(--text-faint); margin-bottom: 8px; }
+  #diagbox .diag-chain b { color: var(--err); }
+  #diagbox .diag-evidence { font-size: 12px; color: var(--text-faint); margin-bottom: 10px; line-height: 1.7; }
+  #diagbox .diag-tip { font-size: 14px; color: var(--text); line-height: 1.8; margin-bottom: 6px; }
+  #diagbox .diag-drill, #diagbox .diag-verify { font-size: 13px; color: var(--text-dim); line-height: 1.8; margin-bottom: 6px; }
+  #diagbox .diag-ranked { margin-top: 4px; font-size: 13px; color: var(--text-dim); }
+  #diagbox .diag-ranked summary { cursor: pointer; color: var(--gold-dim); }
+  #diagbox .diag-ranked ul { margin: 8px 0 0 18px; line-height: 1.9; }
+  #err { display: none; margin-top: 18px; padding: 14px;
+         background: rgba(227, 164, 156, .07);
+         border: 1px solid rgba(227, 164, 156, .28); border-radius: 8px;
+         color: var(--err); font-size: 14px; line-height: 1.7; }
+
+  h3 { font-size: 13px; font-weight: 700; color: var(--gold);
+       letter-spacing: .1em; margin: 22px 0 10px; }
+  video { display: none; }
+  #net { display: none; margin-top: 8px; font-size: 12px; color: var(--gold-dim);
+         text-align: center; }
+
+  .tabs { display: flex; gap: 10px; margin: 22px 0 18px; }
+  .tabs button { flex: 1; margin-top: 0; background: transparent; color: var(--text-dim);
+                 border-color: var(--line); font-weight: 500; }
+  .tabs button.on { background: var(--gold); border-color: var(--gold);
+                    color: #0e0e10; font-weight: 700; }
+
+  #camwrap { display: none; position: relative; margin-top: 14px; border-radius: 14px;
+             overflow: hidden; background: #000; border: 1px solid var(--line); }
+  #cam { display: block; width: 100%; transform: scaleX(-1); }
+  #camcv { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .livebar { display: flex; justify-content: space-between; align-items: center;
+             margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+  #liveStatus { color: var(--gold); font-weight: 600; }
+  .hint { font-size: 12px; color: var(--text-faint); margin-top: 10px; line-height: 1.7; }
+  .hint b { color: var(--text-dim); }
+
+  @media (prefers-reduced-motion: reduce) {
+    #result.show { animation: none; }
+    button, .drop { transition: none; }
+  }
