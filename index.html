@@ -29,6 +29,7 @@
   <div id="panelLive">
     <button id="btnLiveStart">开启摄像头，开始实时评分</button>
     <button id="btnLiveStop" class="danger" style="display:none">停止</button>
+    <button id="btnVoice" title="开启/关闭语音教练（默认关闭）">🔇 语音关</button>
     <div id="camwrap">
       <video id="cam" muted playsinline></video>
       <canvas id="camcv"></canvas>
@@ -51,6 +52,7 @@
       <p>建议：单个完整动作（引拍→击球→随挥），全身入镜，2-5秒</p>
       <input type="file" id="file" accept="video/*" hidden>
     </div>
+    <canvas id="detcv" style="display:none;width:100%;max-width:640px;border-radius:12px;margin-top:12px"></canvas>
     <div id="fname"></div>
     <button id="btn" disabled>开始评分</button>
   </div>
@@ -80,6 +82,8 @@
         <div class="bar"><i id="forceShBar" style="width:0%"></i></div></div>
       <div class="joint"><div class="lbl"><span>持拍侧髋速</span><span id="forceHip"></span></div>
         <div class="bar"><i id="forceHipBar" style="width:0%"></i></div></div>
+      <div class="joint"><div class="lbl"><span>持拍侧腕速</span><span id="forceWr"></span></div>
+        <div class="bar"><i id="forceWrBar" style="width:0%"></i></div></div>
       <div class="force-tip" id="forceTip"></div>
     </div>
     <div id="diagbox">
@@ -128,6 +132,8 @@
 <script src="js/force.js"></script>
 <script src="js/diagnose.js"></script>
 <script src="js/ladder.js"></script>
+<script src="js/voice.js"></script>
+<script src="js/detect.js"></script>
 <script src="js/pose-engine.js"></script>
 <script src="js/live.js"></script>
 <script src="js/ui.js"></script>

@@ -147,14 +147,26 @@ async function extractFrames(file){
     vid.onerror = () => rej(new Error("视频解码失败：浏览器只支持 H.264/H.265 编码的 mp4 或 webm，请换用手机直接拍摄的视频")); });
   const dur = vid.duration;
   if (!dur || !isFinite(dur)) throw new Error("视频无法解码，请换 mp4 格式");
-  const step = 1/15;                       // 15fps 采样
+  const step = 1/30;                       // 30fps 采样（腕速阈值 6.0 按 30fps 校准；15fps 欠采样会漏掉击球腕速尖峰，导致「甩手臂」误判成「身体带动充分」）
   const frames = [];
+  const detCv = $("detcv");               // 球拍/球检测预览 canvas（上传模式可视化）
+  if (detCv) detCv.style.display = "block";
   let t = 0, done = 0;
   while (t < dur) {
     await new Promise(res => { vid.onseeked = res; vid.currentTime = t; });
     const res = landmarker.detectForVideo(vid, Math.round(t*1000));
     const lm = (res.landmarks && res.landmarks.length) ? res.landmarks[0] : null;
     frames.push({ t, lm, angles: lm ? frameAngles(lm) : null });
+
+    // 球拍/球检测预览：当前帧 + 检测框画到可见 canvas（降频，异步不阻塞抽帧）
+    if (detCv && done % 3 === 0){
+      if (detCv.width !== vid.videoWidth){ detCv.width = vid.videoWidth; detCv.height = vid.videoHeight; }
+      const dctx = detCv.getContext("2d");
+      dctx.drawImage(vid, 0, 0);
+      detectFrame(vid).then(d => drawDetections(dctx, d, detCv.width, detCv.height))
+        .catch(() => {});
+    }
+
     t += step; done++;
     if (done % 10 === 0) setStatus(`分析中... ${Math.min(100, Math.round(t/dur*100))}%`);
   }
@@ -167,6 +179,7 @@ async function extractFrames(file){
 
 async function runUpload(file, actionReq, uid){
   await initModel();
+  initDetector();   // 球拍/球检测并行加载，失败静默
   setStatus("提取姿态中...");
   const frames = await extractFrames(file);
   const segs = segment(frames);
@@ -177,6 +190,6 @@ async function runUpload(file, actionReq, uid){
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const force = forceFeatures(seg.frames, (vh.hand || "right"));
-  const diag = diagnose(seg.frames, (vh.hand || "right"), act);
+  const diag = diagnose(seg.frames, (vh.hand || "right"), act, bm.conf);
   return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf, vh, force, diag };
 }

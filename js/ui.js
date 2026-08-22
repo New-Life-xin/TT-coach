@@ -23,14 +23,16 @@ function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh, forc
   $("feedback").textContent = generateFeedback(r);
   // 发力方式维度（身体带动 vs 甩手臂）：独立第二维，主分不变
   const fb = $("forcebox");
-  if (force && force.shN > 0){
+  if (force && (force.shN > 0 || force.hipN > 0 || force.wrN > 0)){
     fb.style.display = "block";
     $("forceGrade").textContent = force.rating;
     $("forceSh").textContent = force.shN.toFixed(2) + " 躯干长/秒";
     $("forceHip").textContent = force.hipN.toFixed(2) + " 躯干长/秒";
+    $("forceWr").textContent = force.wrN.toFixed(2) + " 躯干长/秒";
     $("forceShBar").style.width = Math.min(100, force.shN / 3 * 100) + "%";
     $("forceHipBar").style.width = Math.min(100, force.hipN / 3 * 100) + "%";
-    let tip = forceTipText(force.rating);
+    $("forceWrBar").style.width = Math.min(100, force.wrN / 8.7 * 100) + "%";
+    let tip = forceTipText(force.rating, force);
     if (act === "反手攻球") tip += "（反手标定样本较少，此评级以正手数据为参考。）";
     $("forceTip").textContent = tip;
   } else {
@@ -169,3 +171,11 @@ $("btnCamFlip").onclick = async ()=>{
   }
   $("btnCamFlip").disabled = false;
 };
+
+// ---------- 语音教练开关（默认关，记忆用户选择） ----------
+$("btnVoice").onclick = () => {
+  voiceSetEnabled(!VOICE.enabled);
+  $("btnVoice").textContent = VOICE.enabled ? "🔊 语音开" : "🔇 语音关";
+};
+if (voiceIsEnabled()) VOICE.enabled = true;
+$("btnVoice").textContent = VOICE.enabled ? "🔊 语音开" : "🔇 语音关";

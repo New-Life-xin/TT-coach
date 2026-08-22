@@ -20,6 +20,7 @@ let liveReadySince = 0, liveStartT = 0;   // 就绪门控（首次就位）
 let liveArmed = false, liveLastSeenT = 0; // 就绪锁存：一旦就位，人体不丢失就一直保持
 let livePrevV = 0;                        // 上一帧速度，上升沿触发用
 let livePrevElbow = null, liveFpsT = 0, liveFpsN = 0;
+let detCounter = 0, liveDets = [], detBusy = false;   // 球拍/球检测（降频 + 防堆积，不阻塞评分）
 
 const SKELETON = [   // 骨骼连线（肩/肘/腕/髋/膝/踝）
   [11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
@@ -59,6 +60,7 @@ async function startLive(){
                     "（不要在微信或「文件」App 内打开）；电脑请用最新版 Chrome / Edge");
   const camPromise = openCamera(liveFacing);
   const modelPromise = initModel();
+  initDetector();   // 球拍/球检测并行加载，失败静默（不影响评分）
   try {
     await camPromise;
   } catch (e) {
@@ -144,6 +146,14 @@ function liveLoop(){
     const lm = (res.landmarks && res.landmarks.length) ? res.landmarks[0] : null;
     const frame = { t, lm, angles: lm ? frameAngles(lm) : null };
 
+    // 球拍/球检测（降频 + 防堆积，异步不阻塞姿态评分）
+    if (detCounter++ % DET.freq === 0 && !detBusy){
+      detBusy = true;
+      detectFrame(cam).then(d => { liveDets = d; })
+        .catch(() => { liveDets = []; })
+        .finally(() => { detBusy = false; });
+    }
+
     // 滚动缓冲
     liveBuf.push(frame);
     while (liveBuf.length && liveBuf[0].t < t - LIVE.bufferSec) liveBuf.shift();
@@ -224,6 +234,10 @@ function liveLoop(){
     livePrevV = personHere ? v : 0;
 
     drawSkeleton(lm, cam.videoWidth, cam.videoHeight);
+    if (liveDets.length){
+      drawDetections($("camcv").getContext("2d"), liveDets,
+                     cam.videoWidth, cam.videoHeight, liveFacing === "user");
+    }
   }
   requestAnimationFrame(liveLoop);
 }
@@ -254,10 +268,11 @@ function liveScore(nowT){
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const force = forceFeatures(segFrames, (vh.hand || "right"));
-  const diag = diagnose(segFrames, (vh.hand || "right"), act);
+  const diag = diagnose(segFrames, (vh.hand || "right"), act, bm.conf);
   const ms = Math.round(performance.now() - t0);
   showResult({ r, act, tpl, mirrored, conf: bm.conf, vh,
                seg: { peakTime: (livePeakT % 3600).toFixed(2), detRate: det },
                ladder, liveMs: ms, force, diag });
+  voicePlay(voiceFeedback(uid, r.score, diag));   // 语音教练（默认静音，见 voice.js）
   $("liveStatus").textContent = `上一次挥拍 ${r.score} 分（${ms}ms 出分），继续挥拍可再次评分`;
 }

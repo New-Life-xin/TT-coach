@@ -46,21 +46,34 @@ function bodyScale(frames){   // 躯干长中位数（双肩中点 ~ 双髋中�
 }
 
 function forceFeatures(frames, hand){   // hand: 'right'|'left'（持拍手）
-  const side = hand === 'left' ? { sh: 11, hip: 23 } : { sh: 12, hip: 24 };
+  const side = hand === 'left' ? { sh: 11, hip: 23, wr: 15 } : { sh: 12, hip: 24, wr: 16 };
   const shSp = jointSpeed(frames, side.sh);
   const hipSp = jointSpeed(frames, side.hip);
+  const wrSp = jointSpeed(frames, side.wr);
   const scale = bodyScale(frames);
   const shN = shSp.length ? Math.max(...shSp) / scale : 0;
   const hipN = hipSp.length ? Math.max(...hipSp) / scale : 0;
+  const wrN = wrSp.length ? Math.max(...wrSp) / scale : 0;
   const avg = (shN + hipN) / 2;
-  const rating = avg <= 1.2 ? "身体带动充分" : avg >= 2.8 ? "偏向甩手臂" : "发力方式居中";
-  return { shN, hipN, avg, rating };
+  // 「身体带动充分」需同时满足：肩/髋近端平移低（绕稳定轴旋转）且 腕速适中（随身体动、不甩）。
+  // 腕速高 = 甩手臂（末端在甩、身体没跟上），即便肩/髋没动也不算「身体带动」——
+  // 否则「身体僵硬不动、只甩手腕」会被误判成「身体带动充分」（2026-08 实测反馈修正）。
+  const rating = (avg <= 1.2 && wrN <= 6.0) ? "身体带动充分"
+               : (wrN > 6.0 || avg >= 2.8) ? "偏向甩手臂"
+               : "发力方式居中";
+  return { shN, hipN, wrN, avg, rating };
 }
 
-function forceTipText(rating){
+function forceTipText(rating, force){
   if (rating === "身体带动充分")
-    return "肩/髋近端速度低，说明主要靠转体与重心转移带动挥拍，而非甩手臂——发力方式高效。";
-  if (rating === "偏向甩手臂")
-    return "肩/髋近端速度偏高，提示较多靠手臂发力、身体参与不足。建议先转体、用腰腹带动，再顺势挥臂。";
+    return "肩/髋近端稳定、腕速适中，说明主要靠转体与重心转移带动挥拍，而非甩手臂——发力方式高效。";
+  if (rating === "偏向甩手臂"){
+    // 区分两种「偏向甩手臂」：腕速高（手带太多、身体没参与）vs 肩/髋平移高（重心晃动）
+    if (force && force.wrN > 6.0 && force.avg <= 2.8)
+      return "持拍侧手腕/小臂甩动偏快、身体参与不足（典型的「手带太多」）。建议先转腰再出手，用身体带着手臂走，别单靠手腕甩。";
+    if (force && force.avg >= 2.8)
+      return "肩/髋近端平移速度偏高，身体重心晃动较大。建议稳住重心、绕着身体中轴转，别左右乱晃。";
+    return "较多靠手臂发力、身体参与不足。建议先转体、用腰腹带动，再顺势挥臂。";
+  }
   return "发力方式居中：身体与手臂均有参与，可进一步强化「先转体、再挥臂」的发力顺序。";
 }
