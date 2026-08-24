@@ -75,6 +75,7 @@ async function startLive(){
   $("camwrap").style.display = "block";
   $("btnCamFlip").style.display = "inline-block";
   liveReset();
+  voiceResetSession();   // 清空上一次训练残留的组/会话统计
   liveRunning = true;
   $("liveStatus").textContent = "请退后站定，全身入镜后即可开始挥拍";
   requestAnimationFrame(liveLoop);
@@ -86,6 +87,8 @@ function stopLive(){
   $("camwrap").style.display = "none";
   $("btnCamFlip").style.display = "none";
   $("liveStatus").textContent = "摄像头已关闭";
+  // 训练后总结（非 guest 且 ≥3 拍才播；voicePlay 内部检查静音，静音则不播）
+  voicePlay(voiceSessionSummary($("uid").value.trim() || "guest"));
 }
 
 function drawSkeleton(lm, w, h){
@@ -273,6 +276,6 @@ function liveScore(nowT){
   showResult({ r, act, tpl, mirrored, conf: bm.conf, vh,
                seg: { peakTime: (livePeakT % 3600).toFixed(2), detRate: det },
                ladder, liveMs: ms, force, diag });
-  voicePlay(voiceFeedback(uid, r.score, diag));   // 语音教练（默认静音，见 voice.js）
+  voicePlay(voiceFeedback(uid, r.score, diag, ladder));   // 语音教练（默认静音，见 voice.js）
   $("liveStatus").textContent = `上一次挥拍 ${r.score} 分（${ms}ms 出分），继续挥拍可再次评分`;
 }
