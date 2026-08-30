@@ -190,6 +190,7 @@ async function runUpload(file, actionReq, uid){
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const force = forceFeatures(seg.frames, (vh.hand || "right"));
-  const diag = diagnose(seg.frames, (vh.hand || "right"), act, bm.conf);
-  return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf, vh, force, diag };
+  const angle = resolveAngle($("angle").value, vh.view);
+  const diag = diagnose(seg.frames, (vh.hand || "right"), act, bm.conf, angle);
+  return { r, act, tpl, mirrored, seg, ladder, conf: bm.conf, vh, force, diag, angle };
 }

@@ -271,11 +271,12 @@ function liveScore(nowT){
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const force = forceFeatures(segFrames, (vh.hand || "right"));
-  const diag = diagnose(segFrames, (vh.hand || "right"), act, bm.conf);
+  const angle = resolveAngle($("angle").value, vh.view);
+  const diag = diagnose(segFrames, (vh.hand || "right"), act, bm.conf, angle);
   const ms = Math.round(performance.now() - t0);
   showResult({ r, act, tpl, mirrored, conf: bm.conf, vh,
                seg: { peakTime: (livePeakT % 3600).toFixed(2), detRate: det },
-               ladder, liveMs: ms, force, diag });
+               ladder, liveMs: ms, force, diag, angle });
   voicePlay(voiceFeedback(uid, r.score, diag, ladder));   // 语音教练（默认静音，见 voice.js）
   $("liveStatus").textContent = `上一次挥拍 ${r.score} 分（${ms}ms 出分），继续挥拍可再次评分`;
 }

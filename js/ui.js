@@ -1,11 +1,11 @@
 // ---------- 结果展示（上传 / 实时共用） ----------
-function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh, force, diag }){
+function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh, force, diag, angle }){
   $("score").textContent = r.score;
   $("grade").textContent = r.score>=85?"优秀":r.score>=70?"良好":r.score>=55?"及格":"需加强";
-  // 持拍手以手腕速度实测为准（与拍摄方向无关），视角用面部点可见度判定
+  // 持拍手以手腕速度实测为准（与拍摄方向无关），机位优先用户选择、否则面部可见度自动判
   const handViewTxt = (vh && vh.hand)
     ? ` ｜ ${vh.hand==="right"?"右手":"左手"}持拍` +
-      (vh.view ? `·${vh.view==="front"?"正面":"背面"}拍摄` : "") +
+      (angle ? `·${angle}拍摄` : (vh.view ? `·${vh.view==="front"?"正面":"背面"}拍摄` : "")) +
       (mirrored ? "（已镜像对齐模板）" : "")
     : (mirrored ? " ｜ 已镜像对齐模板" : "");
   $("meta").innerHTML =
@@ -75,9 +75,7 @@ function showResult({ r, act, tpl, mirrored, seg, ladder, liveMs, conf, vh, forc
     g.className = "diag-grade skip";
     $("diagChain").innerHTML = "";
     $("diagEvidence").textContent = "";
-    $("diagTip").textContent = diag.reason === "反手暂不支持诊断"
-      ? "第一版诊断仅覆盖正手攻球，反手击球暂不输出诊断结论。"
-      : "证据不足时系统不输出错误结论，请正面拍摄、持拍侧入镜、相机保持稳定后重试。";
+    $("diagTip").textContent = "系统不输出无把握的错误结论；请按上方提示调整拍摄后重试。";
     $("diagDrill").textContent = "";
     $("diagVerify").textContent = "";
     $("diagRanked").parentElement.style.display = "none";
