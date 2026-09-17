@@ -1,5 +1,9 @@
 // ---------- MediaPipe 加载（单文件版已全部内嵌；双文件版从 CDN 加载） ----------
 let landmarker = null, landmarkerImg = null, _modelU8 = null;
+// 姿态模型跨会话缓存（CacheStorage）：二次及以后访问跳过约 9MB 下载。
+// 换模型时 bump MODEL_CACHE 版本号即可使旧缓存失效。
+const MODEL_CACHE = "tt-model-v1";
+const MODEL_KEY = "assets/pose_landmarker_full.task";
 function b64ToU8(b64){ const bin = atob(b64), n = bin.length, u8 = new Uint8Array(n);
   for (let i = 0; i < n; i++) u8[i] = bin.charCodeAt(i); return u8; }
 async function initModel(){
@@ -38,27 +42,42 @@ async function initModel(){
       "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
     ];
     let buf = null, lastErr = null;
-    for (const url of MODEL_URLS) {
+    // 先查 CacheStorage 本地缓存：二次及以后访问跳过约 9MB 下载。
+    // （GitHub Pages 无法设长缓存头，这里做代码级兜底，也让首页「之后可离线使用」成立。）
+    if (window.caches){
       try {
-        setStatus("正在下载 AI 姿态模型（约9MB）...");
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        const total = +resp.headers.get("content-length") || 9398198;
-        const reader = resp.body.getReader();
-        const chunks = []; let got = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value); got += value.length;
-          setStatus(`正在下载 AI 姿态模型 ${(got/1048576).toFixed(1)}/9.0 MB（${Math.round(got/total*100)}%）...`);
-        }
-        buf = new Uint8Array(got);
-        let off = 0;
-        for (const c of chunks) { buf.set(c, off); off += c.length; }
-        break;
-      } catch (e) { lastErr = e; }
+        const cache = await caches.open(MODEL_CACHE);
+        const hit = await cache.match(MODEL_KEY);
+        if (hit){ buf = new Uint8Array(await hit.arrayBuffer()); setStatus("已从本地缓存加载 AI 模型（无需联网）..."); }
+      } catch(e){}
     }
-    if (!buf) throw new Error("模型下载失败，请检查网络后刷新重试：" + (lastErr && lastErr.message));
+    if (!buf){
+      for (const url of MODEL_URLS) {
+        try {
+          setStatus("正在下载 AI 姿态模型（约9MB）...");
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          const total = +resp.headers.get("content-length") || 9398198;
+          const reader = resp.body.getReader();
+          const chunks = []; let got = 0;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value); got += value.length;
+            setStatus(`正在下载 AI 姿态模型 ${(got/1048576).toFixed(1)}/9.0 MB（${Math.round(got/total*100)}%）...`);
+          }
+          buf = new Uint8Array(got);
+          let off = 0;
+          for (const c of chunks) { buf.set(c, off); off += c.length; }
+          break;
+        } catch (e) { lastErr = e; }
+      }
+      if (!buf) throw new Error("模型下载失败，请检查网络后刷新重试：" + (lastErr && lastErr.message));
+      // 下载成功后写入本地缓存，供下次访问复用（写失败静默，不影响本次加载）
+      if (window.caches){
+        try { const cache = await caches.open(MODEL_CACHE); await cache.put(MODEL_KEY, new Response(buf)); } catch(e){}
+      }
+    }
     setStatus("正在初始化 AI 姿态模型...");
     base = { modelAssetBuffer: buf };
   }
@@ -188,7 +207,7 @@ async function extractFrames(file){
 
 async function runUpload(file, actionReq, uid){
   await initModel();
-  initDetector();   // 球拍/球检测并行加载，失败静默
+  // 球拍/球检测懒加载（detectFrame 内守卫），不与姿态模型抢带宽
   setStatus("提取姿态中...");
   const frames = await extractFrames(file);
   const segs = segment(frames);

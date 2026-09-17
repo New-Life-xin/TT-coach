@@ -97,7 +97,8 @@ async function startLive(){
                     "（不要在微信或「文件」App 内打开）；电脑请用最新版 Chrome / Edge");
   const camPromise = openCamera(liveFacing);
   const modelPromise = initModel();
-  initDetector();   // 球拍/球检测并行加载，失败静默（不影响评分）
+  // 球拍/球检测不再预加载：detectFrame 内有懒加载守卫，首次画框时才初始化，
+  // 避免 onnxruntime(~10.6MB)+weights_best.onnx(11.7MB) 与姿态模型抢带宽、拖慢首用加载。
   try {
     await camPromise;
   } catch (e) {
