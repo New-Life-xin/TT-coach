@@ -3,10 +3,13 @@
    本模块只做两件事：① 决定每拍说什么（基于真实分数/诊断，不做随机）；② 顺序播放 mp3。
 
    关键约束（对话术指南/工作日志）：
-   - 默认静音，用户手动开启；1.5s 冷却，新结果覆盖旧结果（旧音频立刻停止）。
+   - 默认开启（2026-09-17 起，保证一定有语音），可手动静音；1.5s 冷却，新结果覆盖旧结果（旧音频立刻停止）。
    - 个人成绩历史（连续进步/破最佳/疲劳）仅对填了 uid 的用户生效——匿名分数没有
      「主人」，不能混进个人历史；guest 只播纠错话术。
    - 「连续出现」是本次训练内的状态，放内存（页面刷新即重置），不跨会话持久化。
+   - 纠错节奏（2026-09-10 起）像真实教练：有问题直接指出 → 下一拍改善就表扬
+     （improving 话术）→ 错误消失表扬一次后、持续良好即静默；同一错误无改善时
+     每 2 拍才重复纠正一次，避免每拍唠叨。
 
    组间总结（每 10 拍）与训练后总结（点「停止」时）：
    - 也仅对非 guest 生效（匿名只播纠错，不播任何总结）。
@@ -14,23 +17,31 @@
 
 const VOICE_BASE = "assets/voice/";
 
-// 各错误的状态话术文件名（对照 工具/voice_scripts.json；improving 暂不触发）
+// 各错误的状态话术文件名（对照 工具/voice_scripts.json）
+// improving = 「已有改善」话术（2026-09-10 起启用：改善就表扬，像真实教练）；
+// hand_low 仅反手·侧面机位触发、样本少，未合改善/消失话术，improving/resolved 置 null。
 const ERR_VOICE = {
-  unstable:   { first: "err_unstable_first", rep: ["err_unstable_rep0", "err_unstable_rep1", "err_unstable_rep2"], resolved: "err_unstable_resolved" },
-  arm_only:   { first: "err_arm_only_first", rep: ["err_arm_only_rep0", "err_arm_only_rep1", "err_arm_only_rep2"], resolved: "err_arm_only_resolved" },
-  elbow_high: { first: "err_elbow_high_first", rep: ["err_elbow_high_rep0", "err_elbow_high_rep1", "err_elbow_high_rep2"], resolved: "err_elbow_high_resolved" },
-  hand_low:   { first: "err_hand_low_first", rep: ["err_hand_low_first"], resolved: null },
+  unstable:   { first: "err_unstable_first", rep: ["err_unstable_rep0", "err_unstable_rep1", "err_unstable_rep2"], improving: "err_unstable_improving", resolved: "err_unstable_resolved" },
+  arm_only:   { first: "err_arm_only_first", rep: ["err_arm_only_rep0", "err_arm_only_rep1", "err_arm_only_rep2"], improving: "err_arm_only_improving", resolved: "err_arm_only_resolved" },
+  elbow_high: { first: "err_elbow_high_first", rep: ["err_elbow_high_rep0", "err_elbow_high_rep1", "err_elbow_high_rep2"], improving: "err_elbow_high_improving", resolved: "err_elbow_high_resolved" },
+  hand_low:   { first: "err_hand_low_first", rep: ["err_hand_low_first"], improving: null, resolved: null },
 };
 
 const VOICE = {
-  enabled: false,      // 默认关闭
+  enabled: true,       // 默认开启（2026-09-17 起；保证一定有语音，可手动静音）
   cooldownMs: 1500,    // 两拍之间最短间隔
   _lastSpoke: 0,
   _cur: null,          // 当前播放的 Audio（覆盖旧结果时停止）
 };
 
 // 连续错误状态（内存，页面刷新即重置）
+// 教练状态机：有问题直接指出 → 下一拍改善就表扬 → 之后良好则静默（像真实教练，不每拍唠叨）
 let _lastErr = null, _errStreak = { id: null, count: 0 };
+let _errLastScore = 0, _errLastConf = 0, _errQuiet = 0;   // 改善判定 + 防唠叨节流
+
+const IMPROVE_SCORE = 5;    // 分数较上一拍提升 ≥5 分视为「改善」
+const IMPROVE_CONF  = 0.10; // 或错误置信度下降 ≥0.10 视为「改善」（错误指标向达标靠拢）
+const REP_EVERY = 2;        // 同一错误无改善时，每 2 拍才重复纠正一次，其余静默
 
 const GROUP_SIZE = 10;        // 组间总结：每 10 拍
 const MIN_SESSION_SHOTS = 3;  // 训练后总结：至少 3 拍才算一次训练
@@ -48,7 +59,7 @@ function voiceSetEnabled(on){
   try { localStorage.setItem("tt_voice_enabled", on ? "1" : "0"); } catch(e){}
 }
 function voiceIsEnabled(){
-  try { return localStorage.getItem("tt_voice_enabled") === "1"; } catch(e){ return false; }
+  try { return localStorage.getItem("tt_voice_enabled") !== "0"; } catch(e){ return true; }
 }
 
 // 个人成绩历史（仅非 guest，跨会话）
@@ -76,18 +87,85 @@ function voicePlay(ids){
       : VOICE_BASE + ids[i] + ".mp3";
     const a = new Audio(src);
     VOICE._cur = a;
+    a.volume = 1.0;
     a.onended = next;
     a.onerror = next;
     i++;
-    a.play().catch(next);
+    a.play().catch(() => {
+      // 自动播放策略可能拦截：先解锁音频再重试一次，仍失败才跳过下一条
+      unlockAudio().then(() => a.play().catch(next));
+    });
   };
   next();
 }
 
-// 连续错误计数：同一错误连续出现则 +1，否则重置
-function _bumpStreak(errId){
-  if (errId && _errStreak.id === errId) _errStreak.count++;
-  else _errStreak = { id: errId, count: errId ? 1 : 0 };
+// 音频解锁：在用户手势（点击开启摄像头/切换语音）时建 AudioContext 并 resume，
+// 顺带播 1 帧静音，解锁后续 Web Audio 与 HTMLAudio 的自动播放限制。
+let _audioCtx = null;
+async function unlockAudio(){
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    _audioCtx = _audioCtx || new AC();
+    if (_audioCtx.state === "suspended") await _audioCtx.resume();
+    const buf = _audioCtx.createBuffer(1, 1, 22050);
+    const src = _audioCtx.createBufferSource(); src.buffer = buf;
+    src.connect(_audioCtx.destination); src.start(0);
+  } catch(e){}
+  // 顺带激活 speechSynthesis（iOS 需在用户手势内首次 speak，否则稍后 TTS 可能被静默）
+  try {
+    if (window.speechSynthesis){
+      const u = new SpeechSynthesisUtterance(""); u.volume = 0;
+      speechSynthesis.speak(u);
+    }
+  } catch(e){}
+}
+
+// 就位提示音（Web Audio 合成，不受「语音教练」静音开关影响）：短促上扬双音
+function beepReady(){
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    _audioCtx = _audioCtx || new AC();
+    if (_audioCtx.state === "suspended") _audioCtx.resume();
+    const t0 = _audioCtx.currentTime;
+    [[880, 0], [1320, 0.12]].forEach(([f, dt]) => {
+      const o = _audioCtx.createOscillator(), g = _audioCtx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(0.35, t0 + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.22);
+      o.connect(g); g.connect(_audioCtx.destination);
+      o.start(t0 + dt); o.stop(t0 + dt + 0.25);
+    });
+  } catch(e){}
+}
+
+// 就位语音「训练开始」：优先讯飞 mp3（若已加入 VOICE_B64），否则浏览器 TTS 兜底。
+// 跟语音开关走；静音时 beepReady 仍作为「一定有声音」的兜底音。
+function speakStart(){
+  if (!VOICE.enabled) return;
+  if (window.VOICE_B64 && window.VOICE_B64["evt_start"]){ voicePlay(["evt_start"]); return; }
+  try {
+    if (window.speechSynthesis){
+      const u = new SpeechSynthesisUtterance("训练开始");
+      u.lang = "zh-CN"; u.rate = 0.9; u.volume = 1;
+      speechSynthesis.speak(u);
+    }
+  } catch(e){}
+}
+
+// 推进连续错误状态（不产生播报）：与 _errFeedback 共用同一状态机。
+// 组间总结/事件命中时会「跳过」单拍纠错，这里仍要推进状态，保证下一拍「改善/消失」判定连续。
+function _errAdvance(errId, score, conf){
+  if (errId !== _lastErr){
+    _errStreak = { id: errId, count: 1 };
+    _errLastScore = score; _errLastConf = conf; _errQuiet = 0;
+  } else {
+    _errStreak.count++;
+    _errLastScore = score; _errLastConf = conf;
+  }
+  _lastErr = errId;
 }
 
 function _round(n){ return Math.round(n); }
@@ -131,19 +209,34 @@ function voiceSessionSummary(uid){
   return ids;
 }
 
-// 纠错反馈（所有用户，含 guest）：首要错误纠正 / 错误消失肯定
-function _errFeedback(errId){
+// 纠错反馈（所有用户，含 guest）：像真实教练 —— 有问题直接指出 → 改善就表扬 → 良好则静默
+function _errFeedback(errId, score, conf){
   let result = null;
   if (errId && ERR_VOICE[errId]){
-    _bumpStreak(errId);
     const v = ERR_VOICE[errId];
-    result = _errStreak.count === 1
-      ? [v.first]
-      : [v.rep[Math.min(_errStreak.count - 2, v.rep.length - 1)]];
+    if (errId !== _lastErr){
+      result = [v.first];                        // ① 有问题：直接指出
+    } else {
+      // 改善判定：总分提升，或错误置信度下降（错误指标向达标靠拢）
+      const improved = (score >= _errLastScore + IMPROVE_SCORE) ||
+        (conf != null && _errLastConf != null && _errLastConf - conf >= IMPROVE_CONF);
+      if (improved){
+        _errQuiet = 0;                           // ② 改善：有 improving 话术则表扬，否则静默（不纠正）
+        if (v.improving) result = [v.improving];
+      } else {
+        _errQuiet++;                             // ③ 未改善：节流重复纠正（防唠叨）
+        if (_errQuiet >= REP_EVERY){
+          _errQuiet = 0;
+          const n = _errStreak.count + 1;        // 连续拍数（含当前拍）
+          const idx = Math.min(Math.floor(n / REP_EVERY) - 1, v.rep.length - 1);
+          result = [v.rep[Math.max(0, idx)]];
+        }
+      }
+    }
   } else if (!errId && _lastErr && ERR_VOICE[_lastErr] && ERR_VOICE[_lastErr].resolved){
-    result = [ERR_VOICE[_lastErr].resolved];
+    result = [ERR_VOICE[_lastErr].resolved];     // ④ 错误消失：明显表扬（一次，之后良好即静默）
   }
-  _lastErr = errId;
+  _errAdvance(errId, score, conf);
   return result;
 }
 
@@ -152,8 +245,9 @@ function _errFeedback(errId){
 function voiceFeedback(uid, score, diag, ladder){
   const isGuest = !uid || uid === "guest";
   const errId = (diag && diag.top) ? diag.top.id : null;
+  const errConf = (diag && diag.top) ? diag.top.confidence : null;
 
-  if (isGuest) return _errFeedback(errId);   // 匿名：只纠错，无统计/总结
+  if (isGuest) return _errFeedback(errId, score, errConf);   // 匿名：只纠错，无统计/总结
 
   // ---- 会话 + 组统计（非 guest）----
   _session.shots++;
@@ -199,16 +293,14 @@ function voiceFeedback(uid, score, diag, ladder){
   if (_group.scores.length >= GROUP_SIZE){
     const ids = _groupSummary();
     _group = _newGroup();
-    _bumpStreak(errId);
-    _lastErr = errId;
+    _errAdvance(errId, score, errConf);
     return ids;
   }
 
   if (decided){
-    _bumpStreak(errId);
-    _lastErr = errId;
+    _errAdvance(errId, score, errConf);
     return decided;
   }
 
-  return _errFeedback(errId);
+  return _errFeedback(errId, score, errConf);
 }

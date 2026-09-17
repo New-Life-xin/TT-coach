@@ -4,7 +4,7 @@
    业余素材上对照人工分数校准（速度/外展角 3 条仅正手；反手归一化速度随击型差异
    巨大、外展角方向相反，暂不启用；「手过低」已按 动作×机位 分档扩到反手）：
      - 重心不稳：肩/髋归一化平移速度 > 2.0（90分<0.7，60~70分>2.0）
-     - 甩手/手臂发力过猛：归一化腕速 > 6.0（88~91分≤5.6，60~70分≥8.7；原名「只动手臂不转腰」，实抓甩手快）
+     - 甩手/手臂发力过猛：归一化腕速 > 6.0，仅正面/后45度机位启用（88~91分≤5.6，60~70分≥8.7；原名「只动手臂不转腰」，实抓甩手快；侧面/偏侧面投影放大且不分离，2026-09-06 起禁用）
      - 肘部抬得过高：击球瞬间肩外展角 > 70°（90分<25°，60~70分 40~108°；后45度只抓极端，轻微抬肘需正面）
      - 拍子/手过低：腕肩落差 > 0.40（反手·仅侧面拍摄，见 diagHandLowParams）；正手已禁用（机位重标后「正面」=0，无标定依据）
    规则表为纯数据数组，球拍/球追踪上线后按同结构增补即可。
@@ -31,6 +31,14 @@ function diagHandLowParams(f){   // 「手/拍子过低」阈值按 动作×机�
   return null;
 }
 
+function diagArmOnlyParams(f){   // 「甩手」阈值按机位分档（与 error_rules._arm_only_params 同步）；返回 {th,sat,label} 或 null（不诊断）
+  // 2026-09-06 分机位复核：正面/后45度 好球≤4.8（阈值 6.0 安全）；侧面/偏侧面 2D 腕速被投影放大
+  // 且好坏不分离（89分真实段 10.5、教练侧面 11~13，差球仅 3.8）→ 侧面族机位禁用。缺省按正面。
+  if (f.action !== "正手攻球") return null;
+  const ang = f.angle || "正面";
+  return (ang === "正面" || ang === "后45度") ? { th:6.0, sat:8.7, label:"6.0" } : null;
+}
+
 // 机位：优先用户手动选择；「自动」时退回 analyzeViewAndHand 的面部可见度（只能判正/背面，
 // 判不出「侧面」——反手「手过低」需手动选「侧面」才会触发）。
 function resolveAngle(sel, view){
@@ -46,17 +54,18 @@ const DIAG_RULES = [
                (f.hip_norm!=null && f.hip_norm>2.0),
     conf: f => diagConf(diagMax(f.shoulder_norm, f.hip_norm), 2.0, 2.8),
     ev: f => ({ 肩速:f.shoulder_norm, 髋速:f.hip_norm, 目标:"≤2.0" }),
-    coach_phrase:"重心稳住，绕着身体中轴转，别左右乱晃",
-    drill:"徒手转体挥拍 20 次，体会绕轴旋转；对镜看重心是否晃动",
+    coach_phrase:"重心稳住：击球前重心回到后腿，蹬地转髋把重心前移到前腿，绕中轴转，别左右乱晃",
+    drill:"徒手体会重心转移：后腿蹬地→转髋→重心前移 20 次，对镜看重心是否左右晃",
     verify:"肩/髋归一化速度降到 2.0 以下" },
   { id:"arm_only", name:"甩手/手臂发力过猛", severity:"高", sev:3, ease:2,  // 原名「只动手臂不转腰」，实抓甩手快；不转腰由转髋/转肩候选承载
     applies_to:["正手攻球"],
     upstream:["unstable"], downstream:[],
-    cond: f => f.wrist_norm!=null && f.wrist_norm>6.0,
-    conf: f => diagConf(f.wrist_norm, 6.0, 8.7),
+    // 2026-09-06 起按机位分档（diagArmOnlyParams）：侧面/偏侧面好球会被投影放大误报，仅正面/后45度启用
+    cond: f => { const p = diagArmOnlyParams(f); return f.wrist_norm!=null && p!=null && f.wrist_norm>p.th; },
+    conf: f => { const p = diagArmOnlyParams(f); return p ? diagConf(f.wrist_norm, p.th, p.sat) : 0; },
     ev: f => ({ 腕速:f.wrist_norm, 目标:"≤6.0" }),
-    coach_phrase:"别甩手腕，手臂加速要跟着转腰走，控制住拍子",
-    drill:"慢速挥拍控制腕速 20 次，体会转腰带动而非甩手",
+    coach_phrase:"别甩手腕。发力要由下往上：先蹬地转髋、再转腰转肩，最后手臂顺势挥出，别单靠手",
+    drill:"分解发力链 20 次：蹬地→转髋→转肩→挥臂，体会力量从腿上传到拍子；再慢速挥拍压住腕速",
     verify:"归一化腕速降到 6.0 以下" },
   { id:"elbow_high", name:"肘部抬得过高", severity:"中", sev:2, ease:2,
     applies_to:["正手攻球"],
@@ -130,6 +139,10 @@ function diagFeatures(frames, hand){
 function diagnose(frames, hand, act, conf, angle){
   const f = diagFeatures(frames, hand);
   if (f.wrist_vis < 0.3) return { skip:true, reason:"暂时无法判断：持拍侧手臂未入镜。建议从持拍侧正面近景拍摄，让挥拍手臂完整入镜", features:f };
+  // 非挥拍段守卫（与 error_diagnosis._is_non_swing 同步）：肩/髋同时爆炸（>4.0 躯干长/秒）物理上不可能是挥拍，
+  // 是分割器误检的走动/捡球段（实测 5.8~24.1），跳过以防「好球被误判甩手/重心不稳」。
+  if (Math.max(f.shoulder_norm ?? 0, f.hip_norm ?? 0) > 4.0)
+    return { skip:true, reason:"本段疑似非挥拍动作（走动/捡球等），已跳过诊断", features:f };
   // 反手分档：仅「侧面」机位可诊断「手过低」（腕肩落差在侧面视角才可靠，与 error_rules._hand_low_params 同步）。
   // 但「自动判别置信度低」的反手很可能其实是正手（正面拍摄下正反手模板分差过小被误判），
   // 此时不 skip，改按正手规则诊断。
@@ -138,7 +151,7 @@ function diagnose(frames, hand, act, conf, angle){
     return { skip:true, reason:"反手「手过低」仅在侧面机位可靠，请从侧面拍摄（其他反手规则因击型差异大暂不启用）", features:f };
   const effAct = (isBackhand && angle !== "侧面" && conf === "低") ? "正手攻球" : act;
   f.action = effAct;
-  f.angle = (effAct === "反手攻球") ? angle : null;
+  f.angle = angle;   // 正手也需要机位：甩手规则已按机位分档（2026-09-06）
   const triggered = [];
   for (const r of DIAG_RULES){
     if (!r.applies_to.includes(effAct)) continue;

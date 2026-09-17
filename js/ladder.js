@@ -1,10 +1,26 @@
 // ---------- 段位成长（localStorage，只记录成长，不影响评分严格度） ----------
 function ladderKey(uid){ return "tt_ladder_" + uid; }
+function _newLadder(){ return { tierIdx:0, lp:0, sessions:0, scoreSum:0, lowStreak:0 }; }
+function _num(v, d){ return (typeof v === "number" && isFinite(v)) ? v : d; }
 function getLadder(uid){
-  const d = localStorage.getItem(ladderKey(uid));
-  return d ? JSON.parse(d) : { tierIdx:0, lp:0, sessions:0, scoreSum:0, lowStreak:0 };
+  // 容错：localStorage 数据损坏/字段缺失/类型异常时兜底，绝不因持久化数据中断评分
+  try {
+    const raw = localStorage.getItem(ladderKey(uid));
+    if (!raw) return _newLadder();
+    const L = JSON.parse(raw);
+    if (!L || typeof L !== "object") return _newLadder();
+    return {
+      tierIdx: _num(L.tierIdx, 0),
+      lp: _num(L.lp, 0),
+      sessions: _num(L.sessions, 0),
+      scoreSum: _num(L.scoreSum, 0),
+      lowStreak: _num(L.lowStreak, 0),
+    };
+  } catch(e){
+    return _newLadder();
+  }
 }
-function saveLadder(uid, L){ localStorage.setItem(ladderKey(uid), JSON.stringify(L)); }
+function saveLadder(uid, L){ try { localStorage.setItem(ladderKey(uid), JSON.stringify(L)); } catch(e){} }
 
 function coachText(tier, tierIdx, detail, event, sessions){
   const parts = [];

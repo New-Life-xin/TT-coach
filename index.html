@@ -7,6 +7,14 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <title>乒乓球 AI 动作评分系统（网页版）</title>
 <link rel="stylesheet" href="css/style.css">
+<style>
+  .report-box { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+    margin:12px 0; padding:10px 12px; border:1px dashed #334; border-radius:10px; font-size:13px; }
+  .report-box input { flex:1; min-width:120px; }
+  .report-box button { width:auto; padding:6px 14px; font-size:13px; }
+  .report-title { width:100%; color:#8be9fd; font-weight:600; }
+  .report-status { color:#999; }
+</style>
 </head>
 <body>
 <div class="bg-glow" aria-hidden="true"></div>
@@ -29,18 +37,19 @@
   <div id="panelLive">
     <button id="btnLiveStart">开启摄像头，开始实时评分</button>
     <button id="btnLiveStop" class="danger" style="display:none">停止</button>
-    <button id="btnVoice" title="开启/关闭语音教练（默认关闭）">🔇 语音关</button>
+    <button id="btnVoice" title="开启/关闭语音教练（默认开启）">🔊 语音开</button>
     <div id="camwrap">
       <video id="cam" muted playsinline></video>
       <canvas id="camcv"></canvas>
     </div>
+    <div id="orientHint">请将手机横屏放置 —— 横屏画面更宽、全身入镜更稳，手机可架近一些，语音也更清晰</div>
     <div class="livebar">
       <span id="liveStatus">未开启</span>
       <span><button id="btnCamFlip" style="display:none;width:auto;padding:6px 14px;margin:0;font-size:13px">切换镜头</button>
       <span id="liveFps"></span></span>
     </div>
-    <p class="hint">浏览器会请求摄像头权限，请允许。全身入镜、侧面朝镜头、站稳后自然挥拍——
-      每次挥拍结束后会立即出分（通常在 0.2 秒内），可连续练习。<br>
+    <p class="hint">浏览器会请求摄像头权限，请允许。建议<b>手机横屏放置</b>（画面更宽，可站近一些）。
+      全身入镜、侧面朝镜头、站稳后自然挥拍——就位后会自动播报「训练开始」，之后每次挥拍立即出分（约 0.2 秒），可连续练习。<br>
       iPhone 提示：实时摄像头需用 <b>Safari 直接打开本页面</b>（微信/文件 App 内无法调用摄像头）；
       手机自带的 http/文件页面可能不被允许调用摄像头，若无法开启，请用「上传视频」模式——
       手机直接拍摄的 mp4 即可评分。</p>
@@ -70,6 +79,14 @@
     <option value="偏侧面">机位：偏侧面</option>
     <option value="后45度">机位：后45度</option>
   </select>
+  <div class="report-box" id="reportBox">
+    <span class="report-title">📤 实验数据上报（可选 · 匿名，仅上传分数/特征/诊断）</span>
+    <input type="text" id="reportCode" placeholder="参与码（如 P001）" autocomplete="off">
+    <input type="password" id="reportPwd" placeholder="密码" autocomplete="off">
+    <button id="reportLogin" type="button">登录上报</button>
+    <button id="reportLogout" type="button" style="display:none">退出</button>
+    <span id="reportStatus" class="report-status"></span>
+  </div>
   <div id="status"></div>
   <div id="err"></div>
 
@@ -144,5 +161,6 @@
 <script src="js/pose-engine.js"></script>
 <script src="js/live.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/report.js"></script>
 </body>
 </html>

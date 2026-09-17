@@ -1,5 +1,5 @@
 // ---------- MediaPipe 加载（单文件版已全部内嵌；双文件版从 CDN 加载） ----------
-let landmarker = null, _modelU8 = null;
+let landmarker = null, landmarkerImg = null, _modelU8 = null;
 function b64ToU8(b64){ const bin = atob(b64), n = bin.length, u8 = new Uint8Array(n);
   for (let i = 0; i < n; i++) u8[i] = bin.charCodeAt(i); return u8; }
 async function initModel(){
@@ -69,6 +69,15 @@ async function initModel(){
     minTrackingConfidence: 0.5 });
   try { landmarker = await vision.PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
   catch(e) { landmarker = await vision.PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+  // IMAGE 模式实例：每帧强制重检测、不做跨帧追踪。用于「未就位」阶段——
+  // 追踪会粘住先入镜的人（如对面陪练），IMAGE 模式每帧重新选最显著（近侧更大）的人。
+  const imgOpts = (del) => ({
+    baseOptions: Object.assign({ delegate: del }, base),
+    runningMode: "IMAGE", numPoses: 1,
+    minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5 });
+  try { landmarkerImg = await vision.PoseLandmarker.createFromOptions(fileset, imgOpts("GPU")); }
+  catch(e) { landmarkerImg = await vision.PoseLandmarker.createFromOptions(fileset, imgOpts("CPU")); }
   setStatus("模型就绪");
 }
 

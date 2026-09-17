@@ -184,9 +184,16 @@
                     color: #0e0e10; font-weight: 700; }
 
   #camwrap { display: none; position: relative; margin-top: 14px; border-radius: 14px;
-             overflow: hidden; background: #000; border: 1px solid var(--line); }
+             overflow: hidden; background: #000; border: 1px solid var(--line);
+             transition: border-color .2s, box-shadow .2s; }
   #cam { display: block; width: 100%; transform: scaleX(-1); }
   #camcv { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #camwrap.armed { border-color: var(--ok);
+                   box-shadow: 0 0 0 2px var(--ok), 0 0 24px rgba(134, 194, 148, .6); }
+  #orientHint { display: none; margin-top: 10px; padding: 10px 12px;
+                border: 1px solid var(--gold); border-radius: 10px;
+                background: rgba(212, 175, 55, .10); color: var(--gold);
+                font-size: 13px; line-height: 1.6; text-align: center; }
   .livebar { display: flex; justify-content: space-between; align-items: center;
              margin-top: 10px; font-size: 13px; color: var(--text-dim); }
   #liveStatus { color: var(--gold); font-weight: 600; }

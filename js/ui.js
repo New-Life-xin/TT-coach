@@ -170,9 +170,10 @@ $("btnCamFlip").onclick = async ()=>{
   $("btnCamFlip").disabled = false;
 };
 
-// ---------- 语音教练开关（默认关，记忆用户选择） ----------
+// ---------- 语音教练开关（默认开，记忆用户选择） ----------
 $("btnVoice").onclick = () => {
   voiceSetEnabled(!VOICE.enabled);
+  unlockAudio();   // 用户手势内解锁音频，保证后续语音可自动播放
   $("btnVoice").textContent = VOICE.enabled ? "🔊 语音开" : "🔇 语音关";
 };
 if (voiceIsEnabled()) VOICE.enabled = true;
