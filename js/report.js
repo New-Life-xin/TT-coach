@@ -220,6 +220,34 @@
     syncAuth();
   }
 
+  function reviewStatus(t) { var n = el("reviewStatus"); if (n) n.textContent = t; }
+  function reviewContext() { return window.LastUploadReview || null; }
+  async function submitVideoReview(scoreAgree, actionAgree, withVideo) {
+    var ctx = reviewContext();
+    if (!ctx) throw new Error("请先在“上传视频评分”模式完成一次评分");
+    if (!token()) throw new Error("请先登录实验数据上报账号");
+    var form = new FormData();
+    form.append("program_score", ctx.out.r.score); form.append("program_action", ctx.out.act);
+    form.append("score_agree", scoreAgree); form.append("action_agree", actionAgree);
+    form.append("user_note", (el("reviewNote").value || "").trim());
+    form.append("consent_video", withVideo);
+    if (withVideo) form.append("video", ctx.file, ctx.file.name);
+    var res = await fetch(CFG.base + CFG.api + "/reviews", { method:"POST",
+      headers:{ Authorization:"Bearer " + token() }, body:form });
+    if (!res.ok) { var d = await res.json().catch(function(){ return {}; }); throw new Error(d.detail || "提交失败"); }
+    return res.json();
+  }
+  function bindReviewUI() {
+    var box=el("reviewBox"), agree=el("reviewAgree"), disagree=el("reviewDisagree"), submit=el("reviewSubmit");
+    if (!box) return;
+    var reset=function(){ el("reviewConsent").style.display="none"; el("reviewNote").style.display="none"; submit.style.display="none"; };
+    agree.onclick=async function(){ try { reviewStatus("提交中…"); await submitVideoReview(true,true,false); reviewStatus("感谢反馈，已记录为一致"); reset(); } catch(e){ reviewStatus(e.message); } };
+    disagree.onclick=function(){ el("reviewConsent").style.display=""; el("reviewNote").style.display=""; submit.style.display=""; reviewStatus("勾选同意后可提交本次视频给教练复核"); };
+    submit.onclick=async function(){ if (!el("reviewVideoConsent").checked) { reviewStatus("请先勾选视频上传同意项"); return; }
+      try { submit.disabled=true; reviewStatus("正在安全上传视频…"); await submitVideoReview(false,false,true); reviewStatus("已提交，教练复核后会更新优化标签"); reset(); } catch(e){ reviewStatus(e.message); } finally { submit.disabled=false; } };
+    var oldShow=window.showResult; window.showResult=function(agg){ var r=oldShow.apply(this,arguments); box.style.display=(token() && reviewContext())?"flex":"none"; return r; };
+  }
+
   // 包装 showResult：实时 + 上传的唯一汇合点，上报不阻塞界面
   var _origShow = window.showResult;
   if (typeof _origShow === "function") {
@@ -247,4 +275,6 @@
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindUI);
   else bindUI();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindReviewUI);
+  else bindReviewUI();
 })();

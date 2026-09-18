@@ -326,7 +326,7 @@ function liveScore(nowT){
   const uid = $("uid").value.trim() || "guest";
   const angles = segFrames.map(f => f.angles);
   const vh = analyzeViewAndHand(segFrames.map(f => f.lm));
-  const bm = bestMatch(angles, $("action").value, vh.mirrorLock);
+  const bm = bestMatch(angles, $("action").value, vh.mirrorHint);
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const force = forceFeatures(segFrames, (vh.hand || "right"));

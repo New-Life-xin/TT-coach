@@ -90,6 +90,16 @@
   <div id="status"></div>
   <div id="err"></div>
 
+  <div class="report-box" id="reviewBox" style="display:none">
+    <span class="report-title">🧪 结果反馈（帮助改进算法）</span>
+    <button id="reviewAgree" type="button">评分和动作都符合</button>
+    <button id="reviewDisagree" type="button">有不一致，提交教练复核</button>
+    <label id="reviewConsent" style="display:none;width:100%;color:#bbb"><input id="reviewVideoConsent" type="checkbox"> 我同意上传本次视频，仅供教练复核与算法优化</label>
+    <input id="reviewNote" type="text" placeholder="可选：你认为正确的评分或动作类型" style="display:none">
+    <button id="reviewSubmit" type="button" style="display:none">提交含视频的复核申请</button>
+    <span id="reviewStatus" class="report-status"></span>
+  </div>
+
   <div id="result">
     <div class="score-wrap">
       <div class="score"><span id="score">--</span><small> / 100</small></div>

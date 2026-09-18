@@ -112,8 +112,9 @@ async function initModel(){
    解决方案：
    - 视角：正面拍摄时鼻/眼关键点可见，背面拍摄时被头部遮挡 → 用面部点可见度区分；
    - 持拍手：挥拍段内哪侧手腕速度积分大，哪侧就是持拍手（与视角无关，天然可靠）；
-   - 两者结合推出"应有的镜像状态"（右手+正面 或 左手+背面 ⇒ 需要镜像对齐模板），
-     并在匹配备忘中锁定该镜像方向，避免正反手因镜像歧义被翻转。 */
+   - 两者结合推出镜像偏好（右手+正面 或 左手+背面 ⇒ 倾向镜像对齐模板）。
+     注意：非持拍手也可能摆动更大，或持拍腕被遮挡，因此它只能用来打破
+     近似平分，不能硬性排除另一种镜像；否则会把正确的正/反手模板排除。 */
 function analyzeViewAndHand(lms){   // lms: 段内有检出的帧的 landmarks 数组
   let faceSum = 0, faceN = 0;
   const spd = { left: 0, right: 0 };
@@ -137,31 +138,48 @@ function analyzeViewAndHand(lms){   // lms: 段内有检出的帧的 landmarks �
     else if (spd.left > spd.right * 1.25) hand = "left";
   }
   // 模板=背面+右手 ⇒ 需镜像当且仅当 (右手且正面) 或 (左手且背面)
-  let mirrorLock = null;
-  if (view && hand) mirrorLock = (hand === "right") === (view === "front");
-  return { view, hand, mirrorLock, faceVis: +faceVis.toFixed(2) };
+  let mirrorHint = null;
+  if (view && hand) mirrorHint = (hand === "right") === (view === "front");
+  return { view, hand, mirrorHint, faceVis: +faceVis.toFixed(2) };
 }
 
-function bestMatch(segAngles, actionReq, mirrorLock){
+function bestMatch(segAngles, actionReq, mirrorHint){
   const actions = actionReq==="自动" ? ["正手攻球","反手攻球"] : [actionReq];
-  let best = null; const bestByAct = {};
-  const mirrorOpts = (mirrorLock === null || mirrorLock === undefined)
-    ? [false, true] : [mirrorLock];
+  let best = null; const candidatesByAct = {};
+  // 始终比较两个镜像方向。镜像偏好来自腕速，腕速并非可靠的持拍手真值；
+  // 用它硬锁方向会导致正反手自动判别在遮挡/大幅摆臂时系统性翻转。
+  const mirrorOpts = [false, true];
   for (const act of actions){
     const tpls = TEMPLATES.filter(t=>t.action===act);
+    candidatesByAct[act] = [];
     for (const mirrored of mirrorOpts){
       const ua = mirrored ? mirrorAngles(segAngles) : segAngles;
+      let bestForMirror = null;
       for (const tpl of tpls){
         const r = scoreSeq(ua, tpl.angles, SCORE_K);   // 固定 k，不随段位变化
-        if (!best || r.score > best.r.score) best = { r, act, tpl, mirrored };
-        if (!bestByAct[act] || r.score > bestByAct[act].r.score)
-          bestByAct[act] = { r, act, tpl, mirrored };
+        if (!bestForMirror || r.score > bestForMirror.r.score)
+          bestForMirror = { r, act, tpl, mirrored };
       }
+      if (bestForMirror) candidatesByAct[act].push(bestForMirror);
     }
+  }
+  const bestByAct = {};
+  for (const act of actions){
+    const candidates = candidatesByAct[act];
+    if (!candidates.length) continue;
+    let choice = candidates.reduce((a,b) => a.r.score >= b.r.score ? a : b);
+    // 两个方向的模板分相差极小时，才使用机位/腕速推导的偏好消除镜像抖动。
+    const hinted = typeof mirrorHint === "boolean"
+      ? candidates.find(c => c.mirrored === mirrorHint) : null;
+    if (hinted && choice.r.score - hinted.r.score <= 1.5) choice = hinted;
+    bestByAct[act] = choice;
+    if (!best || choice.r.score > best.r.score) best = choice;
   }
   if (actionReq==="自动" && bestByAct["正手攻球"] && bestByAct["反手攻球"]){
     const d = Math.abs(bestByAct["正手攻球"].r.score - bestByAct["反手攻球"].r.score);
     best.conf = d >= 8 ? "高" : d >= 3 ? "中" : "低";
+    best.actionScores = { forehand: bestByAct["正手攻球"].r.score,
+                          backhand: bestByAct["反手攻球"].r.score };
   }
   return best;
 }
@@ -214,7 +232,7 @@ async function runUpload(file, actionReq, uid){
   if (!segs.length) throw new Error("未能检出有效击球动作，请确认视频包含完整的挥拍动作");
   const seg = segs.reduce((a,b)=> a.peakSpeed>=b.peakSpeed?a:b);
   const vh = analyzeViewAndHand(seg.lms);
-  const bm = bestMatch(seg.angles, actionReq, vh.mirrorLock);
+  const bm = bestMatch(seg.angles, actionReq, vh.mirrorHint);
   const { r, act, tpl, mirrored } = bm;
   const ladder = recordLadder(uid, r.score, r.joint_detail);
   const force = forceFeatures(seg.frames, (vh.hand || "right"));

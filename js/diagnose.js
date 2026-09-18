@@ -144,12 +144,12 @@ function diagnose(frames, hand, act, conf, angle){
   if (Math.max(f.shoulder_norm ?? 0, f.hip_norm ?? 0) > 4.0)
     return { skip:true, reason:"本段疑似非挥拍动作（走动/捡球等），已跳过诊断", features:f };
   // 反手分档：仅「侧面」机位可诊断「手过低」（腕肩落差在侧面视角才可靠，与 error_rules._hand_low_params 同步）。
-  // 但「自动判别置信度低」的反手很可能其实是正手（正面拍摄下正反手模板分差过小被误判），
-  // 此时不 skip，改按正手规则诊断。
+  // 不根据低置信度把已识别为反手的动作改按正手规则诊断；这会掩盖识别不确定性，
+  // 也会令界面中的动作类别与建议依据相互矛盾。
   const isBackhand = (act === "反手攻球");
-  if (isBackhand && angle !== "侧面" && conf !== "低")
-    return { skip:true, reason:"反手「手过低」仅在侧面机位可靠，请从侧面拍摄（其他反手规则因击型差异大暂不启用）", features:f };
-  const effAct = (isBackhand && angle !== "侧面" && conf === "低") ? "正手攻球" : act;
+  if (isBackhand && angle !== "侧面")
+    return { skip:true, reason:"反手动作仅在侧面机位可做可靠诊断；当前识别置信度不足时请提交复核或从侧面重新拍摄", features:f };
+  const effAct = act;
   f.action = effAct;
   f.angle = angle;   // 正手也需要机位：甩手规则已按机位分档（2026-09-06）
   const triggered = [];

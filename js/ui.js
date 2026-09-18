@@ -118,6 +118,7 @@ btn.onclick = async ()=>{
   const uid = $("uid").value.trim() || "guest";
   try {
     const out = await runUpload(file.files[0], $("action").value, uid);
+    window.LastUploadReview = { file: file.files[0], out: out };
     showResult(out);
     setStatus("完成");
   } catch(e){
