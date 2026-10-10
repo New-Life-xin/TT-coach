@@ -99,7 +99,8 @@ function segment(frames) {   // frames: [{t, lm|null, angles}]
   });
   const sorted = [...sm].sort((a,b)=>a-b);
   const p75 = sorted[Math.floor(n*0.75)];
-  const mx = sorted[n-1];
+  // 参考峰值用 P98 而非最大值：一帧关键点乱跳就会抬高门限、漏掉其余挥拍（与 Python peaks.py 同步，2026-10-09）
+  const mx = sorted[Math.floor((n-1)*0.98)];
   const th = p75 + 0.25*(mx-p75);
   const effFps = 1 / ((ts[n-1]-ts[0])/(n-1) || 1/15);
   const minGap = Math.floor(0.9*effFps);

@@ -174,7 +174,8 @@ function liveElbowSpeed(f, prev){
 function liveThreshold(){
   if (liveSpeeds.length < 20) return Infinity;
   const s = [...liveSpeeds].sort((a,b)=>a-b);
-  const p75 = s[Math.floor(s.length*0.75)], mx = s[s.length-1];
+  // 参考峰值用 P98（与 Python peaks.py 同步）：单帧乱跳不再把门限抬高到漏拍
+  const p75 = s[Math.floor(s.length*0.75)], mx = s[Math.floor((s.length-1)*0.98)];
   return Math.max(p75 + 0.25*(mx-p75), LIVE.minPeakSpeed*0.6);
 }
 
