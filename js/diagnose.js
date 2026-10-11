@@ -34,7 +34,7 @@ function diagHandLowParams(f){   // 「手/拍子过低」阈值按 动作×机�
 function diagUnstableParams(f){   // 「重心不稳」按机位分档（与 error_rules._unstable_params 同步）；返回 {th,sat,label} 或 null
   // 2026-10-09 锁定学员后重提取复核：侧面机位两段 89 分视频逐段中位 1.85/2.01，70 分仅 0.93，
   // 侧拍时向前转移重心本身就是画面内大幅平移、与乱晃不分离 → 侧面禁用；后45度/偏侧面仍有效。
-  if (f.angle === "侧面") return null;
+  if (f.angle === "侧面" || f.angle === "侧后方") return null;   // 侧后方（>125°）无标定数据，2026-10-11
   return { th:2.0, sat:2.8, label:"2.0" };
 }
 
