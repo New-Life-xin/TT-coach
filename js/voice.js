@@ -99,10 +99,26 @@ function voicePlay(ids){
   next();
 }
 
+// 预先下载常用话术（双文件版）：每段 mp3 第一次播放要先从服务器下载，实测 0.3–2.3 秒，
+// 会让纠错语音明显落后于动作。开启摄像头时把开场与四类纠错话术（约 0.4MB）先下到浏览器缓存。
+let _voiceWarmed = false;
+function voiceWarm(){
+  if (_voiceWarmed || window.VOICE_B64) return;
+  _voiceWarmed = true;
+  if (navigator.connection && navigator.connection.saveData) return;   // 省流量模式不预下载
+  const ids = ["evt_start"];
+  for (const e in ERR_VOICE){
+    const v = ERR_VOICE[e];
+    [v.first, ...v.rep, v.improving, v.resolved].forEach(x => { if (x && ids.indexOf(x) < 0) ids.push(x); });
+  }
+  ids.forEach(id => { try { fetch(VOICE_BASE + id + ".mp3").catch(() => {}); } catch(e){} });
+}
+
 // 音频解锁：在用户手势（点击开启摄像头/切换语音）时建 AudioContext 并 resume，
 // 顺带播 1 帧静音，解锁后续 Web Audio 与 HTMLAudio 的自动播放限制。
 let _audioCtx = null;
 async function unlockAudio(){
+  voiceWarm();
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
@@ -145,7 +161,9 @@ function beepReady(){
 // 跟语音开关走；静音时 beepReady 仍作为「一定有声音」的兜底音。
 function speakStart(){
   if (!VOICE.enabled) return;
-  if (window.VOICE_B64 && window.VOICE_B64["evt_start"]){ voicePlay(["evt_start"]); return; }
+  // 讯飞 mp3 两个版本都有（单文件版内嵌、双文件版在 assets/voice/）；浏览器 TTS 只作兜底：
+  // 不少手机 / 微信内置浏览器没有中文语音包，TTS 会直接无声。
+  if (window.VOICE_B64 ? window.VOICE_B64["evt_start"] : true){ VOICE._lastSpoke = 0; voicePlay(["evt_start"]); return; }
   try {
     if (window.speechSynthesis){
       const u = new SpeechSynthesisUtterance("训练开始");
