@@ -13,6 +13,20 @@
 (function () {
   "use strict";
 
+  // 2026-10-17：网页版定为「旧版演示」，评分是未经验证的模板相似度，与小程序口径不同，
+  // 默认不再上报研究数据、不收教练复核视频。确需开启（例如内部调试）时在 index.html 里
+  // 声明 window.REPORT_CONFIG = { enabled: true }。
+  if (!(window.REPORT_CONFIG && window.REPORT_CONFIG.enabled)) {
+    var hide = function () {
+      ["reportBox", "reviewBox"].forEach(function (id) {
+        var n = document.getElementById(id); if (n) n.style.display = "none";
+      });
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hide); else hide();
+    window.ReportSDK = { disabled: true };
+    return;
+  }
+
   var CFG = {
     base: (window.REPORT_CONFIG && window.REPORT_CONFIG.base) || "https://ttcoach.cn",
     api: "/api/v1",

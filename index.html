@@ -14,6 +14,8 @@
   .report-box button { width:auto; padding:6px 14px; font-size:13px; }
   .report-title { width:100%; color:#8be9fd; font-weight:600; }
   .report-status { color:#999; }
+  .legacy-note { margin:8px 0 12px; padding:8px 12px; border-radius:8px; font-size:13px; line-height:1.6;
+                 background:rgba(255,184,77,.12); border:1px solid rgba(255,184,77,.45); color:#ffd59a; }
 </style>
 </head>
 <body>
@@ -26,7 +28,9 @@
   </div>
 <div class="card">
   <h1>乒乓球 AI 动作评分系统</h1>
-  <p class="sub">网页版 · 所有计算均在本地浏览器完成，视频不上传 ｜ 统一评分标准，实时反馈</p>
+  <p class="sub">网页版 · 所有计算均在本地浏览器完成，视频不上传</p>
+  <div class="legacy-note" role="note">旧版演示：本页的分数是与标准模板的相似度，2026-10 复核发现它与教练评分不相关，
+    只用于演示动作捕捉效果，不代表动作水平，也不作为研究数据。学员训练与数据采集请使用微信小程序。</div>
   <div id="net">首次使用需联网加载 AI 模型（约10MB），之后可离线使用</div>
 
   <div class="tabs">
@@ -103,10 +107,11 @@
   <div id="result">
     <div class="score-wrap">
       <div class="score"><span id="score">--</span><small> / 100</small></div>
+      <div class="meta">模板相似度（演示，未经教练评分验证）</div>
       <div class="grade" id="grade"></div>
       <div class="meta" id="meta"></div>
     </div>
-    <h3>各关节匹配度</h3>
+    <h3>各关节与模板的相似度（演示）</h3>
     <div id="joints"></div>
     <div class="feedback" id="feedback"></div>
     <div id="forcebox">

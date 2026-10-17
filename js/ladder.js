@@ -25,7 +25,7 @@ function saveLadder(uid, L){ try { localStorage.setItem(ladderKey(uid), JSON.str
 function coachText(tier, tierIdx, detail, event, sessions){
   const parts = [];
   if (event==="placement") parts.push(`已完成${PLACEMENT}次定段评估，教练已为你记录了训练起点。`);
-  else if (event==="promote") parts.push("最近进步明显，已进入下一训练阶段——继续保持。");
+  else if (event==="promote") parts.push("最近几次模板相似度提高，阶段进度前进（演示，不代表技术水平评定）。");
   else if (event==="demote") parts.push("最近状态有波动，先回到上一阶段的训练重点巩固一下，这不是退步，是为了走得更稳。");
   else if (sessions<=PLACEMENT) parts.push(`初始评估进行中（${sessions}/${PLACEMENT}），再完成几次练习，系统就能画出你的成长曲线。`);
   const gaps = tier.focus.map(j=>[detail[j]?detail[j].mean_deviation_deg:0, j])
@@ -75,7 +75,7 @@ function generateFeedback(result){
     else if (d.mean_deviation_deg >= mild) issues.push([d.weight*d.mean_deviation_deg, text]);
   }
   issues.sort((a,b)=>b[0]-a[0]);
-  if (!issues.length) return "动作规范，各关节与标准模板匹配良好，继续保持！";
+  if (!issues.length) return "各关节与标准模板的相似度较高（模板相似度未经教练评分验证，不代表动作完全正确）。";
   const s = result.score;
   const head = s>=85 ? "动作与标准模板高度接近。" : s>=70 ? "动作基本规范，仍有提升空间。"
                : "动作与标准差距较明显，建议对照模板分解练习。";
