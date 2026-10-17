@@ -237,3 +237,32 @@ video { display: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before { animation: none !important; transition: none !important; }
 }
+
+/* ---------- 训练处方 / 复测 / 反馈（与小程序一致） ---------- */
+.rs-rx-list { display: grid; gap: 8px; margin-top: 10px; }
+.rs-rx-item { display: grid; gap: 2px; text-align: left; border: 0; border-left: 3px solid var(--gold); background: rgba(229, 182, 43, .08);
+  color: var(--paper); padding: 8px 10px; cursor: pointer; font-size: 13px; }
+.rs-rx-item b { font: 700 16px var(--kai); color: var(--gold); }
+.rs-rx-item span { color: var(--mist); }
+.rs-coach { display: inline-block; margin-top: 12px; text-decoration: none; font-size: 14px; padding: 7px 16px; }
+.rs-retest { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--gold); background: rgba(229, 182, 43, .08); }
+.rs-retest b { font: 700 17px var(--kai); color: var(--gold); }
+.rs-retest .rs-hint { margin: 4px 0 8px; }
+.rs-retest label { display: grid; gap: 3px; font-size: 12.5px; color: var(--mist); max-width: 260px; }
+.rs-retest .rs-mini { margin: 8px 0 0; }
+select:disabled { opacity: .6; }
+.rs-rx { margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--gold); background: rgba(13, 15, 20, .9); font-size: 14px; }
+.rs-rx.muted { border-left-color: #3a4050; }
+.rs-rx h3 { margin: 0 0 6px; font: 700 18px var(--kai); color: var(--paper); }
+.rs-rx-name { font: 700 22px var(--kai); color: var(--gold); margin-bottom: 6px; }
+.rs-rx p { margin: 4px 0; color: var(--mist); }
+.rs-rx .rs-drill { color: var(--paper); }
+.rs-rx-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.rs-outcome { display: inline-block; padding: 3px 10px; margin-bottom: 6px; background: #1d212b; font-weight: 600; }
+.rs-outcome.good { background: var(--gold); color: #1a1a1a; }
+.rs-feedback { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #333a48; }
+.rs-feedback h3 { font: 700 18px var(--kai); color: var(--paper); margin: 0 0 4px; }
+.rs-feedback .rs-consent { margin: 8px 0; }
+.rs-feedback textarea { width: 100%; min-height: 70px; margin: 6px 0 10px; padding: 8px 10px; background: #000; border: 1px solid var(--line); color: var(--paper); font: inherit; font-size: 14px; }
+.foot { margin-top: 40px; font-size: 13px; color: var(--mist); text-shadow: 0 0 4px #000; }
+.foot a { color: var(--paper); margin-right: 6px; }

@@ -115,6 +115,12 @@
         </div>
         <div id="rsUploadBox" class="box rs-upload" style="display:none">
           <h2>上传到服务器分析</h2>
+          <div id="rsRetestBanner" class="rs-retest" style="display:none">
+            <b>处方复测 · <span id="rsRetestName"></span></b>
+            <p id="rsRetestTip" class="rs-hint"></p>
+            <label>复测前是否完成了处方练习<select id="rsDrills"><option value="">选填</option><option value="done">已完成</option><option value="not_done">没完成</option></select></label>
+            <button type="button" id="rsRetestCancel" class="rs-mini">取消复测</button>
+          </div>
           <p class="rs-hint">与小程序同一套分析，结果存入你的训练记录。动作、机位用右侧「这一组练什么」里的选择。</p>
           <div class="rs-grid">
             <label>训练任务<select id="rsTask"><option value="">选填</option><option>定点练习</option><option>对攻/推挡</option><option>多点移动</option><option>比赛/对抗</option><option>其他</option></select></label>
@@ -124,6 +130,16 @@
           <button type="button" id="rsUpload" class="btn">上传到服务器分析</button>
           <div id="rsStatus" class="rs-msg" role="status"></div>
           <div id="rsResult" class="rs-result"></div>
+          <div id="rsRxBox"></div>
+          <div id="rsFeedback" class="rs-feedback" style="display:none">
+            <h3>结果反馈</h3>
+            <p class="rs-hint">告诉我们动作判断是否符合你的认知。只有勾选下方授权，原视频才会交给教练复核。</p>
+            <label class="rs-consent"><input type="checkbox" id="rsFbAgree"> 动作类型判断符合我的认知</label>
+            <label class="rs-consent"><input type="checkbox" id="rsFbConsent"> 我同意把这次原视频交给教练复核，用于改进算法</label>
+            <textarea id="rsFbNote" maxlength="2000" placeholder="可选：说明你认为不一致的地方"></textarea>
+            <button type="button" id="rsFbSubmit" class="btn ghost">提交反馈</button>
+            <span id="rsFbMsg" class="rs-msg" role="status"></span>
+          </div>
         </div>
       </div>
     </section>
@@ -171,6 +187,8 @@
         </div>
         <div id="rsIn" style="display:none" class="rs-in">
           已登录：<b id="rsWho"></b> <button type="button" id="rsLogout" class="rs-mini">退出</button>
+          <div id="rsRxList" class="rs-rx-list"></div>
+          <a id="rsCoach" class="btn ghost rs-coach" href="https://ttcoach.cn/api/v1/coach/app" style="display:none">进入教练审核</a>
         </div>
         <p id="rsNote" class="rs-note" style="display:none" role="status"></p>
       </section>
@@ -237,6 +255,7 @@
       </div>
     </aside>
   </div>
+  <footer class="foot"><a id="coachLink" href="https://ttcoach.cn/api/v1/coach/app">教练审核入口</a><span>（教练用自己的账号登录）</span></footer>
   <video id="vid" muted playsinline></video>
   <canvas id="cv" style="display:none"></canvas>
 </main>

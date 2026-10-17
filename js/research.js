@@ -28,9 +28,9 @@
   function user() { try { return JSON.parse(lget(K.user) || "null"); } catch (e) { return null; } }
   function save(d) {
     lset(K.access, d.access_token); lset(K.refresh, d.refresh_token);
-    if (d.user) lset(K.user, JSON.stringify({ login: d.user.login_name, code: d.user.participant_code }));
+    if (d.user) lset(K.user, JSON.stringify({ login: d.user.login_name, code: d.user.participant_code, role: d.user.role }));
   }
-  function signOut() { [K.access, K.refresh, K.user, K.task].forEach(ldel); render(); }
+  function signOut() { [K.access, K.refresh, K.user, K.task].forEach(ldel); setRetest(null); render(); }
 
   async function detail(res) {
     try { var j = await res.json(); return j.detail || j.message || ""; } catch (e) { return ""; }
@@ -145,6 +145,13 @@
     if ($("rsTask").value) form.append("task", $("rsTask").value);
     if ($("rsFeed").value) form.append("feed_mode", $("rsFeed").value);
     form.append("share_with_coach", $("rsShare").checked ? "true" : "false");
+    if (retestRx) {
+      form.append("prescription_id", retestRx.id);
+      var dr = $("rsDrills").value;
+      if (dr) form.append("drills", dr);
+      // 自报完成练习（与小程序一致）；失败不阻断复测
+      if (dr === "done" && !retestRx.drillsDone) api("/prescriptions/" + retestRx.id + "/drills", { method: "POST", json: { note: null } }).catch(function () {});
+    }
     $("rsUpload").disabled = true;
     try {
       st.textContent = "正在上传 0%";
@@ -164,7 +171,7 @@
         var r = await api("/tasks/" + encodeURIComponent(tid));
         if (r.status === 404) { clearInterval(polling); ldel(K.task); st.textContent = "任务已过期"; $("rsUpload").disabled = false; return; }
         var t = await r.json();
-        if (t.status === "done") { clearInterval(polling); ldel(K.task); st.textContent = "完成"; showResult(tid, t); $("rsUpload").disabled = false; }
+        if (t.status === "done") { clearInterval(polling); ldel(K.task); st.textContent = "完成"; setRetest(null); showResult(tid, t); $("rsUpload").disabled = false; loadRx(); }
         else if (t.status === "failed" || t.status === "interrupted") {
           clearInterval(polling); ldel(K.task); $("rsUpload").disabled = false;
           st.textContent = t.error || "分析失败";
@@ -189,9 +196,7 @@
     if (drill) html += row("下一步练", esc(drill), "gold");
     if (sc.status && sc.status !== "ok") html += row("系统评分", esc(sc.message || "本次不给分档"));
     if (r.view && r.view.note) html += row("机位", esc(r.view.note));
-    if (r.retest) html += row("复测", esc(r.retest.message || r.retest.outcome));
-    else if (r.prescription) html += row("训练处方", esc((r.prescription.prescription && r.prescription.created ? "已开处方：" + r.prescription.prescription.error_name + "。" : "") + (r.prescription.reason || "")));
-    if (r.prescription_error) html += row("训练处方", esc(r.prescription_error), "bad");
+    if (r.prescription_error) html += row("训练处方", "暂不可用：" + esc(r.prescription_error), "bad");
     var sync = t.sync_status || r.backend_sync;
     if (sync === "failed") html += row("保存", '结果还没存进训练记录。<button type="button" id="rsRetry" class="rs-mini">重试保存</button>', "bad");
     else html += row("保存", "已存入你的训练记录");
@@ -199,6 +204,8 @@
     if (cs) html += row("教练评测", esc(cs.message) + (cs.status === "done" && r.backend_session_id
       ? ' <button type="button" id="rsWithdraw" class="rs-mini">撤回视频</button>' : ""), cs.status === "done" ? "" : "bad");
     $("rsResult").innerHTML = html;
+    showRx(r);
+    showFeedback(r);
     var b = $("rsRetry");
     if (b) b.onclick = async function () {
       b.disabled = true; b.textContent = "正在保存…";
@@ -221,6 +228,167 @@
     };
   }
 
+  // ---------------------------------------------------------------- 训练处方与复测（与小程序一致）
+  var OUTCOME_CN = {
+    resolved: "本次复测指标达到目标", met_unconfirmed: "指标达标，待确认（条件未完全核对）",
+    improving: "指标向目标靠近", no_change: "指标无明显变化",
+    insufficient: "证据不足", not_comparable: "与上次不可比"
+  };
+  var RX_STATUS_CN = { no_supported_issue: "没有稳定出现的问题", insufficient_data: "数据不足", out_of_scope: "超出支持范围", error: "系统暂不可用" };
+  var retestRx = null;
+  function rxView(p) {
+    if (!p) return null;
+    var u = p.metric_unit || "";
+    return { id: p.id, name: p.error_name, action: p.action, angle: p.angle || "自动", status: p.status,
+      attempts: p.attempts || 0, phrase: p.coach_phrase || "", drill: p.drill || "", verify: p.verify || "",
+      drillsDone: !!p.drills_done_at, cond: (p.baseline_snapshot && p.baseline_snapshot.condition) || {},
+      baseline: p.metric_label + "：开处方时中位数 " + (p.baseline_metric != null ? p.baseline_metric.toFixed(2) : "—") + u +
+        "（目标 ≤" + p.threshold + u + "），" + p.baseline_n + " 拍中 " + Math.round(p.baseline_rate * 100) + "% 出现" };
+  }
+  function rxCard(rx, title, extra) {
+    var h = '<div class="rs-rx"><h3>' + esc(title) + '</h3><div class="rs-rx-name">先改：' + esc(rx.name) + "</div>" + (extra || "") +
+      '<p>' + esc(rx.baseline) + "</p>" + (rx.phrase ? "<p>要点：" + esc(rx.phrase) + "</p>" : "") +
+      (rx.drill ? '<p class="rs-drill">练习：' + esc(rx.drill) + "</p>" : "") + (rx.verify ? "<p>达标：" + esc(rx.verify) + "</p>" : "");
+    if (rx.status === "active") {
+      h += '<div class="rs-rx-actions"><button type="button" class="btn" data-rx-retest="' + esc(rx.id) + '">我练完了，去复测</button>' +
+        '<button type="button" class="btn ghost" data-rx-close="' + esc(rx.id) + '">暂不练这个</button></div>' +
+        '<p class="rs-hint">复测请尽量用相近的机位（' + esc(rx.angle) + '），系统会用同一指标与这次对比。</p>';
+    } else h += '<p class="rs-hint">这个处方已结束。</p>';
+    return h + "</div>";
+  }
+  var rxCache = {};
+  async function showRx(r) {
+    var box = $("rsRxBox"); if (!box) return;
+    box.innerHTML = "";
+    if (r.retest) {
+      var t = r.retest, extra = '<div class="rs-outcome' + (t.outcome === "resolved" ? " good" : "") + '">' +
+        esc(OUTCOME_CN[t.outcome] || t.outcome) + "</div><p>" + esc(t.message || "") + "</p>";
+      box.innerHTML = '<div class="rs-rx"><h3>复测结果</h3>' + extra + "</div>";
+      try {
+        var res = await api("/prescriptions/" + encodeURIComponent(t.prescription_id));
+        if (res.ok) { var rx = rxView(await res.json()); rxCache[rx.id] = rx; box.innerHTML = rxCard(rx, "复测结果", extra); bindRx(box); }
+      } catch (e) {}
+      return;
+    }
+    var prop = r.prescription;
+    if (!prop) return;
+    if (prop.prescription) {
+      var rx2 = rxView(prop.prescription); rxCache[rx2.id] = rx2;
+      box.innerHTML = rxCard(rx2, prop.created ? "本次训练处方" : "进行中的训练处方",
+        !prop.created && prop.reason ? "<p>" + esc(prop.reason) + "</p>" : "");
+      bindRx(box);
+    } else if (prop.reason) {
+      var lab = RX_STATUS_CN[prop.status] ? "：暂不开（" + RX_STATUS_CN[prop.status] + "）" : "";
+      box.innerHTML = '<div class="rs-rx muted"><h3>训练处方' + esc(lab) + "</h3><p>" + esc(prop.reason) + "</p></div>";
+    }
+  }
+  function bindRx(scope) {
+    scope.querySelectorAll("[data-rx-retest]").forEach(function (b) {
+      b.onclick = function () { startRetest(b.getAttribute("data-rx-retest")); };
+    });
+    scope.querySelectorAll("[data-rx-close]").forEach(function (b) {
+      b.onclick = async function () {
+        if (!confirm("放弃这个处方？放弃后下次训练会根据新的表现重新开处方。")) return;
+        b.disabled = true;
+        try { var res = await api("/prescriptions/" + b.getAttribute("data-rx-close") + "/close", { method: "POST", json: {} });
+          if (res.ok) { loadRx(); var c = b.closest(".rs-rx"); if (c) c.querySelector(".rs-rx-actions").outerHTML = '<p class="rs-hint">已放弃这个处方。</p>'; }
+          else { b.disabled = false; alert(await detail(res) || "操作失败"); }
+        } catch (e) { b.disabled = false; }
+      };
+    });
+  }
+  async function loadRx() {
+    var box = $("rsRxList"); if (!box || !lget(K.access)) return;
+    try {
+      var res = await api("/prescriptions?status_filter=active");
+      if (!res.ok) return;
+      var list = (await res.json()).map(rxView);
+      list.forEach(function (x) { rxCache[x.id] = x; });
+      box.innerHTML = list.map(function (x) {
+        return '<button type="button" class="rs-rx-item" data-rx-retest="' + esc(x.id) + '"><b>训练处方 · ' + esc(x.name) + "</b><span>" +
+          esc(x.action) + " · " + esc(x.angle) + "机位" + (x.attempts ? " · 已复测 " + x.attempts + " 次" : "") + "　练完后点此复测 ›</span></button>";
+      }).join("");
+      bindRx(box);
+    } catch (e) {}
+  }
+  async function startRetest(id) {
+    var rx = rxCache[id];
+    if (!rx) { try { var res = await api("/prescriptions/" + id); if (res.ok) rx = rxCache[id] = rxView(await res.json()); } catch (e) {} }
+    if (!rx) return;
+    setRetest(rx);
+    var tab = $("tabUpload"); if (tab) tab.click();
+    var box = $("rsUploadBox"); if (box) box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // 复测模式：动作与机位锁定为开处方时的（阈值按机位分档），训练条件按上次预填
+  function setRetest(rx) {
+    retestRx = rx;
+    var bn = $("rsRetestBanner"), act = $("action"), ang = $("angle");
+    if (!bn) return;
+    if (!rx) {
+      bn.style.display = "none";
+      [act, ang].forEach(function (el) { if (el) el.disabled = false; });
+      $("rsUpload").textContent = "上传到服务器分析";
+      return;
+    }
+    bn.style.display = "";
+    $("rsRetestName").textContent = rx.name;
+    $("rsRetestTip").textContent = "动作和机位已锁定为上次的（" + rx.action + " · " + rx.angle + "），训练任务和喂球方式按上次预填；前后条件一致才能比较。至少打 3–5 拍。";
+    if (act) { act.value = rx.action; act.disabled = true; }
+    if (ang) { ang.value = (Array.prototype.some.call(ang.options, function (o) { return o.value === rx.angle; }) ? rx.angle : "自动"); ang.disabled = true; }
+    if (rx.cond.task) $("rsTask").value = rx.cond.task;
+    if (rx.cond.feed_mode) $("rsFeed").value = rx.cond.feed_mode;
+    $("rsDrills").value = rx.drillsDone ? "done" : "";
+    $("rsUpload").textContent = "上传复测视频";
+  }
+
+  // ---------------------------------------------------------------- 结果反馈（与小程序一致）
+  var ACT_CN = { fh: "正手攻球", bh: "反手攻球" };
+  function showFeedback(r) {
+    var box = $("rsFeedback"); if (!box) return;
+    var first = (r.strokes || [])[0] || {};
+    box.dataset.score = r.score != null ? r.score : 0;
+    box.dataset.action = ACT_CN[first.action] || first.action || "未知";
+    box.style.display = "";
+    $("rsFbAgree").checked = false; $("rsFbConsent").checked = false; $("rsFbNote").value = "";
+    $("rsFbMsg").textContent = ""; $("rsFbSubmit").disabled = false; $("rsFbSubmit").textContent = "提交反馈";
+  }
+  async function submitFeedback() {
+    var box = $("rsFeedback"), msg = $("rsFbMsg"), btn = $("rsFbSubmit");
+    var note = $("rsFbNote").value.trim();
+    // 网页不显示分数，「评分是否符合」没有被问到：在备注里标明，避免被当成「认可评分」
+    var userNote = "[网页·未显示分数] " + note;
+    var base = { program_score: Math.max(0, Math.min(100, +box.dataset.score || 0)), program_action: box.dataset.action,
+      score_agree: false, action_agree: $("rsFbAgree").checked, user_note: userNote };
+    btn.disabled = true; msg.textContent = "提交中…";
+    try {
+      var res;
+      if ($("rsFbConsent").checked) {
+        var f = pickedFile();
+        if (!f) throw new Error("原视频已不可用，请重新选择视频后再提交复核");
+        var form = new FormData();
+        Object.keys(base).forEach(function (k) { form.append(k, String(base[k])); });
+        form.append("consent_video", "true");
+        form.append("video", f, f.name || "clip.mp4");
+        res = await api("/reviews", { method: "POST", body: form });
+      } else {
+        res = await api("/reviews/feedback", { method: "POST", json: base });
+      }
+      if (!res.ok) throw new Error(await detail(res) || ("提交失败（HTTP " + res.status + "）"));
+      msg.textContent = $("rsFbConsent").checked ? "已提交教练复核，谢谢。" : "反馈已记录，谢谢。";
+      btn.textContent = "已提交";
+    } catch (e) { msg.textContent = e.message || "提交失败，请稍后再试"; btn.disabled = false; }
+  }
+
+  // ---------------------------------------------------------------- 教练审核入口
+  // 已登录的教练 / 研究者：带上当前登录状态直接进入审核页（同一网站，不用再登录一次）
+  function goCoach(e) {
+    var u = user(), at = lget(K.access), rt = lget(K.refresh);
+    if (BASE === "" && at && u && ["coach", "researcher", "admin"].indexOf(u.role) >= 0) {
+      try { sessionStorage.setItem("at", at); if (rt) sessionStorage.setItem("rt", rt); } catch (err) {}
+    }
+    if (BASE === "") { if (e) e.preventDefault(); location.href = "/api/v1/coach/app"; }
+  }
+
   // ---------------------------------------------------------------- 渲染
   function render() {
     var box = $("researchBox"); if (!box) return;
@@ -234,6 +402,17 @@
     $("rsIn").style.display = u ? "" : "none";
     $("rsUploadBox").style.display = u ? "" : "none";
     if (u) $("rsWho").textContent = (u.login || u.code) + (u.login ? "（研究编号 " + u.code + "）" : "");
+    var staff = !!(u && ["coach", "researcher", "admin"].indexOf(u.role) >= 0);
+    var cb = $("rsCoach"); if (cb) cb.style.display = staff ? "" : "none";
+    var list = $("rsRxList"); if (list) { if (u) loadRx(); else list.innerHTML = ""; }
+    // 早先登录时没记下角色：向服务器补问一次（兑换教练码后角色也会变）
+    if (u && !u.role && !render._asked) {
+      render._asked = true;
+      api("/auth/me").then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
+        if (me && me.role) { u.role = me.role; lset(K.user, JSON.stringify(u)); render(); }
+      }).catch(function () {});
+    }
+    var fb = $("rsFeedback"); if (fb && !u) fb.style.display = "none";
   }
   function init() {
     if (!$("researchBox")) return;
@@ -242,6 +421,9 @@
     $("rsForm").onsubmit = submitAuth;
     $("rsLogout").onclick = function () { signOut(); note(""); };
     $("rsUpload").onclick = startUpload;
+    $("rsRetestCancel").onclick = function () { setRetest(null); };
+    $("rsFbSubmit").onclick = submitFeedback;
+    ["rsCoach", "coachLink"].forEach(function (id) { var a = $(id); if (a) a.addEventListener("click", goCoach); });
     setForm("login");
     render();
     var pending = lget(K.task);
