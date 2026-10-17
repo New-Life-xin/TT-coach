@@ -87,11 +87,11 @@
   .drop:hover, .drop.on { border-color: var(--gold); background: var(--surface); }
   .drop p { margin-top: 8px; font-size: 13px; color: var(--text-faint); }
 
-  input[type=text], select { width: 100%; padding: 12px 14px; border: 1px solid var(--line);
+  input[type=text], input[type=password], select { width: 100%; padding: 12px 14px; border: 1px solid var(--line);
            border-radius: 10px; margin-top: 14px; font-size: 15px;
            background: var(--surface-2); color: var(--text); }
-  input[type=text]::placeholder { color: var(--text-faint); }
-  input[type=text]:focus, select:focus, button:focus-visible {
+  input[type=text]::placeholder, input[type=password]::placeholder { color: var(--text-faint); }
+  input[type=text]:focus, input[type=password]:focus, select:focus, button:focus-visible {
     outline: 1px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
 
   button { width: 100%; padding: 14px; border: 1px solid var(--gold); border-radius: 10px;
@@ -204,3 +204,39 @@
     #result.show { animation: none; }
     button, .drop { transition: none; }
   }
+
+  /* ===== 参与研究（登录 / 注册 / 上传到服务器分析） ===== */
+  .research, .rs-upload { margin: 14px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px;
+    background: rgba(14, 14, 16, .55); font-size: 14px; }
+  .rs-upload { margin-top: 14px; }
+  .rs-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin-bottom: 10px; }
+  .rs-head b { color: var(--gold-bright); font-size: 15px; }
+  .rs-head span, .rs-hint { color: var(--text-faint); font-size: 12.5px; line-height: 1.6; }
+  .rs-hint a { color: var(--gold-bright); }
+  .rs-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .rs-tabs button { width: auto; margin: 0; padding: 5px 12px; font-size: 13px; background: transparent;
+    border: 1px solid var(--line); color: var(--text-dim); border-radius: 999px; }
+  .rs-tabs button:hover { background: transparent; color: var(--text); }
+  .rs-tabs button.on { border-color: var(--gold); color: var(--gold-bright); }
+  #rsForm, #rsRegOnly { display: grid; gap: 8px; }
+  #rsForm input, .rs-grid select { margin: 0; }
+  #rsForm button[type=submit], #rsUpload { margin: 2px 0 0; }
+  .rs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 480px) { .rs-grid { grid-template-columns: 1fr; } }
+  .rs-consent { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 4px; font-size: 13px;
+    color: var(--text-dim); line-height: 1.6; }
+  .rs-consent input { width: auto; margin: 4px 0 0; flex: none; }
+  .rs-msg { display: block; min-height: 1.4em; margin-top: 6px; font-size: 13px; color: var(--text-dim); }
+  .rs-note { margin: 10px 0 0; font-size: 13px; color: var(--ok); }
+  .rs-in { font-size: 14px; color: var(--text-dim); }
+  .rs-in b { color: var(--text); }
+  .rs-mini { width: auto !important; margin: 0 0 0 6px !important; padding: 3px 10px !important;
+    font-size: 12px !important; display: inline-block; }
+  .rs-result { display: grid; gap: 8px; margin-top: 10px; }
+  .rs-row { display: grid; grid-template-columns: 5.5em 1fr; gap: 10px; padding: 8px 10px;
+    border-left: 2px solid var(--line); background: rgba(255, 255, 255, .02); font-size: 13.5px; line-height: 1.6; }
+  .rs-row > span { color: var(--text-faint); }
+  .rs-row.warn { border-left-color: #e0705f; }
+  .rs-row.gold { border-left-color: var(--gold); }
+  .rs-row.bad { border-left-color: var(--err); }
+  .rs-row.bad > div { color: var(--err); }

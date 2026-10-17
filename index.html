@@ -28,9 +28,36 @@
   </div>
 <div class="card">
   <h1>乒乓球 AI 动作评分系统</h1>
-  <p class="sub">网页版 · 所有计算均在本地浏览器完成，视频不上传</p>
-  <div class="legacy-note" role="note">旧版演示：本页的分数是与标准模板的相似度，2026-10 复核发现它与教练评分不相关，
-    只用于演示动作捕捉效果，不代表动作水平，也不作为研究数据。学员训练与数据采集请使用微信小程序。</div>
+  <p class="sub">网页版 · 默认所有计算都在本地浏览器完成、视频不上传；登录「参与研究」后才可选择上传到服务器分析</p>
+  <div class="legacy-note" role="note">旧版演示：本页在浏览器里算出的分数是与标准模板的相似度，2026-10 复核发现它与教练评分不相关，
+    只用于演示动作捕捉效果，不代表动作水平，也不作为研究数据。参与研究请登录后用「上传到服务器分析」，
+    或使用微信小程序。</div>
+
+  <section class="research" id="researchBox" aria-label="参与研究">
+    <div class="rs-head"><b>参与研究</b><span>可选。不登录时本页完全离线，什么都不上传。</span></div>
+    <div id="rsOff" style="display:none" class="rs-hint">参与研究请在 <a href="https://ttcoach.cn/web/">ttcoach.cn/web</a> 打开本页，或使用微信小程序。</div>
+    <div id="rsAuth">
+      <div class="rs-tabs" role="group" aria-label="登录或注册">
+        <button type="button" id="rsTabLogin" class="on">登录</button>
+        <button type="button" id="rsTabReg">第一次使用：注册</button>
+      </div>
+      <form id="rsForm" autocomplete="on">
+        <input type="text" id="rsName" autocomplete="username" maxlength="40">
+        <input id="rsPwd" type="password" maxlength="128" placeholder="密码（至少 6 位）">
+        <div id="rsRegOnly" style="display:none">
+          <input id="rsPwd2" type="password" autocomplete="new-password" maxlength="128" placeholder="再输一次密码">
+          <input type="text" id="rsInvite" autocomplete="off" maxlength="64" placeholder="邀请码（向教练要，如 TT-1A2B3C4D）">
+          <p class="rs-hint">登录名自己起、好记就行，换手机或电脑时用同一个账号登录。忘记密码请找教练重置。</p>
+        </div>
+        <button type="submit" id="rsSubmit">登录</button>
+        <span id="rsMsg" class="rs-msg" role="status"></span>
+      </form>
+    </div>
+    <div id="rsIn" style="display:none" class="rs-in">
+      已登录：<b id="rsWho"></b> <button type="button" id="rsLogout" class="rs-mini">退出</button>
+    </div>
+    <p id="rsNote" class="rs-note" style="display:none" role="status"></p>
+  </section>
   <div id="net">首次使用需联网加载 AI 模型（约10MB），之后可离线使用</div>
 
   <div class="tabs">
@@ -67,7 +94,18 @@
     </div>
     <canvas id="detcv" style="display:none;width:100%;max-width:640px;border-radius:12px;margin-top:12px"></canvas>
     <div id="fname"></div>
-    <button id="btn" disabled>开始评分</button>
+    <button id="btn" disabled>开始评分（本地，不上传）</button>
+    <div id="rsUploadBox" class="rs-upload" style="display:none">
+      <div class="rs-head"><b>上传到服务器分析</b><span>与小程序同一套分析，结果存入你的训练记录。动作、机位用下方的选择。</span></div>
+      <div class="rs-grid">
+        <select id="rsTask"><option value="">训练任务（选填）</option><option>定点练习</option><option>对攻/推挡</option><option>多点移动</option><option>比赛/对抗</option><option>其他</option></select>
+        <select id="rsFeed"><option value="">喂球方式（选填）</option><option>多球</option><option>对练</option><option>发球机</option><option>自抛自打</option><option>其他</option></select>
+      </div>
+      <label class="rs-consent"><input type="checkbox" id="rsShare"> 同意把这段视频交给教练评测。视频只给教练看（不显示你的账号），保留 90 天后自动删除，可随时撤回。</label>
+      <button type="button" id="rsUpload">上传到服务器分析</button>
+      <div id="rsStatus" class="rs-msg" role="status"></div>
+      <div id="rsResult" class="rs-result"></div>
+    </div>
   </div>
 
   <input type="text" id="uid" placeholder="昵称/学号（记录成长轨迹，存于本机）">
@@ -177,5 +215,6 @@
 <script src="js/live.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/report.js"></script>
+<script src="js/research.js"></script>
 </body>
 </html>
