@@ -1,5 +1,10 @@
 // ---------- 语音教练（预合成 mp3 播放 + 反馈决策） ----------
-/* 话术已由 工具/tts_xfyun.py 用讯飞音色 x6_lingfeihao_pro 预合成到 assets/voice/，
+/* 2026-10-17 起：语音只做纠错这一条线（指出问题 → 改善就表扬 → 问题消失肯定一次）。
+   模板相似度分数与教练评分不相关，所有依赖它的播报（个人最佳、连续进步、平均分、段位升降、
+   按分数判断的疲劳提醒）一律不播；「是否改善」只看诊断指标（错误置信度）是否下降。
+   相应的 mp3 仍保留在 assets/voice/，不再被调用。
+
+   话术已由 工具/tts_xfyun.py 用讯飞音色 x6_lingfeihao_pro 预合成到 assets/voice/，
    本模块只做两件事：① 决定每拍说什么（基于真实分数/诊断，不做随机）；② 顺序播放 mp3。
 
    关键约束（对话术指南/工作日志）：
@@ -197,31 +202,20 @@ function _topFromCount(count){
 }
 
 // 组间总结拼装（每 10 拍）：平均分 + 稳定性 + 最高频错误 + 下一组重点
+// 只总结这一组最常出现的问题；没有反复出现的问题就不播（「没检出」不等于动作没问题，规则覆盖有限）
 function _groupSummary(){
-  const avg = _round(_mean(_group.scores));
-  const ids = ["grp_avg", "num_" + avg];
-  const spread = Math.max(..._group.scores) - Math.min(..._group.scores);
-  if (spread <= 12) ids.push("grp_stable");
-  else if (spread >= 25) ids.push("grp_unstable");
   const top = _topFromCount(_group.errCount);
-  if (top) ids.push("grp_weak", "err_name_" + top.id, "grp_next", "err_focus_" + top.id);
-  else ids.push("grp_noerr");
-  return ids;
+  return top ? ["grp_weak", "err_name_" + top.id, "grp_next", "err_focus_" + top.id] : null;
 }
 
 // 训练后总结（点停止时）：总拍数 + 平均分 + 段位变化 + 短板 + 下次重点
 function voiceSessionSummary(uid){
   const isGuest = !uid || uid === "guest";
   if (isGuest || _session.shots < MIN_SESSION_SHOTS){ voiceResetSession(); return null; }
-  const ids = ["sum_total", "nump_" + Math.min(_session.shots, 100), "sum_pai",
-               "sum_avg", "num_" + _round(_mean(_session.scores))];
-  const ev = _session.lastEvent, ti = _session.tierIdx;
-  if (ev === "promote"   && ti != null) ids.push("sum_promote",   "tier_" + ti);
-  else if (ev === "placement" && ti != null) ids.push("sum_placement", "tier_" + ti);
-  else if (ev === "demote" && ti != null) ids.push("sum_demote",  "tier_" + ti);
+  // 只报拍数和最常出现的问题；不报平均分、不报段位（都来自未经验证的模板相似度）
+  const ids = ["sum_total", "nump_" + Math.min(_session.shots, 100), "sum_pai"];
   const top = _topFromCount(_session.errCount);
   if (top) ids.push("grp_weak", "err_name_" + top.id, "grp_next", "err_focus_" + top.id);
-  else ids.push("grp_noerr");
   ids.push("sum_end");
   voiceResetSession();
   return ids;
@@ -235,9 +229,8 @@ function _errFeedback(errId, score, conf){
     if (errId !== _lastErr){
       result = [v.first];                        // ① 有问题：直接指出
     } else {
-      // 改善判定：总分提升，或错误置信度下降（错误指标向达标靠拢）
-      const improved = (score >= _errLastScore + IMPROVE_SCORE) ||
-        (conf != null && _errLastConf != null && _errLastConf - conf >= IMPROVE_CONF);
+      // 改善判定：只看错误置信度下降（错误指标向达标靠拢）；不看模板相似度分数（未经验证）
+      const improved = conf != null && _errLastConf != null && _errLastConf - conf >= IMPROVE_CONF;
       if (improved){
         _errQuiet = 0;                           // ② 改善：有 improving 话术则表扬，否则静默（不纠正）
         if (v.improving) result = [v.improving];
@@ -258,8 +251,9 @@ function _errFeedback(errId, score, conf){
   return result;
 }
 
-// 反馈决策：返回要播放的文件名数组（话术指南「八·语音决策优先级」）
-// 优先级：组间总结 > 疲劳 > 破最佳 > 连续进步 > 首要错误纠正 > 错误消失肯定 > 静默
+// 反馈决策：返回要播放的文件名数组
+// 优先级：组间总结（有反复出现的问题时）> 首要错误纠正 / 改善表扬 > 错误消失肯定 > 静默
+// （原「疲劳 / 破最佳 / 连续进步」依赖模板相似度分数，2026-10-17 起停用）
 function voiceFeedback(uid, score, diag, ladder){
   const isGuest = !uid || uid === "guest";
   const errId = (diag && diag.top) ? diag.top.id : null;
@@ -279,45 +273,11 @@ function voiceFeedback(uid, score, diag, ladder){
   _group.scores.push(score);
   if (errId) _group.errCount[errId] = (_group.errCount[errId] || 0) + 1;
 
-  // ---- 个人历史（跨会话：疲劳/破最佳/连续进步）----
-  const hist = voiceGetHist(uid);
-  const scores = hist.scores, prevBest = hist.best;
-  const firstRun = scores.length === 0;
-  let decided = null;
-
-  // 1. 明显疲劳：最近3拍都低于此前基线均值5分以上
-  if (scores.length >= 3){
-    const last3 = scores.slice(-3);
-    const base = scores.length >= 4
-      ? scores.slice(0, -3).reduce((a, b) => a + b, 0) / (scores.length - 3)
-      : scores.reduce((a, b) => a + b, 0) / scores.length;
-    if (last3.length === 3 && last3.every(s => s < base - 5)) decided = ["evt_fatigue"];
-  }
-  // 2. 打破个人最佳（首次训练不触发）
-  if (!decided && !firstRun && score > prevBest && score >= 70)
-    decided = ["evt_best", "num_" + Math.round(score)];
-  // 3. 连续三拍进步
-  if (!decided && scores.length >= 2){
-    const p1 = scores[scores.length - 1], p2 = scores[scores.length - 2];
-    if (p2 < p1 && p1 < score) decided = ["evt_improving", "num_" + Math.round(score)];
-  }
-
-  // 无论是否命中事件，都推进个人历史
-  scores.push(score); if (scores.length > 12) scores.shift();
-  hist.best = Math.max(prevBest, score);
-  voicePutHist(uid, hist);
-
-  // ---- 组间总结：满 10 拍优先于一切即时反馈 ----
+  // ---- 组间总结：满 10 拍时，如有反复出现的问题，优先于单拍纠错 ----
   if (_group.scores.length >= GROUP_SIZE){
     const ids = _groupSummary();
     _group = _newGroup();
-    _errAdvance(errId, score, errConf);
-    return ids;
-  }
-
-  if (decided){
-    _errAdvance(errId, score, errConf);
-    return decided;
+    if (ids){ _errAdvance(errId, score, errConf); return ids; }
   }
 
   return _errFeedback(errId, score, errConf);
