@@ -3,204 +3,261 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="preload" as="image" href="assets/bg1.jpg">
+<meta name="theme-color" content="#000000">
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
-<title>乒乓球 AI 动作评分系统（网页版）</title>
+<title>乒乓球动作捕捉（网页版）</title>
 <link rel="stylesheet" href="css/style.css">
-<style>
-  .report-box { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
-    margin:12px 0; padding:10px 12px; border:1px dashed #334; border-radius:10px; font-size:13px; }
-  .report-box input { flex:1; min-width:120px; }
-  .report-box button { width:auto; padding:6px 14px; font-size:13px; }
-  .report-title { width:100%; color:#8be9fd; font-weight:600; }
-  .report-status { color:#999; }
-  .legacy-note { margin:8px 0 12px; padding:8px 12px; border-radius:8px; font-size:13px; line-height:1.6;
-                 background:rgba(255,184,77,.12); border:1px solid rgba(255,184,77,.45); color:#ffd59a; }
-</style>
 </head>
 <body>
-<div class="bg-glow" aria-hidden="true"></div>
-<div class="bg-champion" aria-hidden="true">
-    <img src="assets/bg1.jpg" alt="" loading="eager" decoding="async">
-    <img src="assets/bg2.jpg" alt="" loading="eager" decoding="async">
-    <img src="assets/bg3.jpg" alt="" loading="eager" decoding="async">
-    <img src="assets/bg4.jpg" alt="" loading="eager" decoding="async">
-  </div>
-<div class="card">
-  <h1>乒乓球 AI 动作评分系统</h1>
-  <p class="sub">网页版 · 默认所有计算都在本地浏览器完成、视频不上传；登录「参与研究」后才可选择上传到服务器分析</p>
-  <div class="legacy-note" role="note">旧版演示：本页在浏览器里算出的分数是与标准模板的相似度，2026-10 复核发现它与教练评分不相关，
-    只用于演示动作捕捉效果，不代表动作水平，也不作为研究数据。参与研究请登录后用「上传到服务器分析」，
-    或使用微信小程序。</div>
 
-  <section class="research" id="researchBox" aria-label="参与研究">
-    <div class="rs-head"><b>参与研究</b><span>可选。不登录时本页完全离线，什么都不上传。</span></div>
-    <div id="rsOff" style="display:none" class="rs-hint">参与研究请在 <a href="https://ttcoach.cn/web/">ttcoach.cn/web</a> 打开本页，或使用微信小程序。</div>
-    <div id="rsAuth">
-      <div class="rs-tabs" role="group" aria-label="登录或注册">
-        <button type="button" id="rsTabLogin" class="on">登录</button>
-        <button type="button" id="rsTabReg">第一次使用：注册</button>
+<!-- 共用的「毛边」滤镜：纯色块压成笔刷边缘；背景笔触是内联 SVG，没有图片请求 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <filter id="rough" x="-5%" y="-20%" width="110%" height="140%">
+    <feTurbulence type="fractalNoise" baseFrequency=".04 .6" numOctaves="2" seed="3"/>
+    <feDisplacementMap in="SourceGraphic" scale="9"/>
+  </filter>
+  <filter id="rough-s" x="-5%" y="-20%" width="110%" height="140%">
+    <feTurbulence type="fractalNoise" baseFrequency=".08 .9" numOctaves="2" seed="8"/>
+    <feDisplacementMap in="SourceGraphic" scale="4"/>
+  </filter>
+  <filter id="dry" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency=".004 .09" numOctaves="3" seed="5" result="n"/>
+    <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -3.2 2.1" result="m"/>
+    <feComposite in="SourceGraphic" in2="m" operator="in" result="d"/>
+    <feTurbulence type="fractalNoise" baseFrequency=".02 .05" numOctaves="2" seed="11" result="e"/>
+    <feDisplacementMap in="d" in2="e" scale="18"/>
+  </filter>
+</svg>
+
+<div class="strokes" aria-hidden="true">
+  <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
+    <g filter="url(#dry)">
+      <path d="M-40 300 C 200 270, 600 285, 1040 330 L 1040 342 C 700 360, 300 392, -40 410 Z" fill="#2350e6" opacity=".92"/>
+      <path d="M120 418 C 420 400, 700 398, 1020 380 L 1020 386 C 700 410, 400 420, 120 426 Z" fill="#5b86ff" opacity=".6"/>
+      <path d="M-40 650 C 300 625, 650 640, 1040 600 L 1040 606 C 650 660, 300 690, -40 712 Z" fill="#d9281f" opacity=".8"/>
+      <path d="M300 560 C 500 552, 760 556, 1040 548 L 1040 551 C 760 562, 500 566, 300 566 Z" fill="#f2efe6" opacity=".5"/>
+    </g>
+    <g id="splat" fill="#f2efe6"></g>
+  </svg>
+</div>
+
+<main class="wrap">
+  <header class="mast">
+    <h1>挥拍，看见自己</h1>
+    <p class="sub">网页版动作捕捉。默认所有计算都在你的浏览器里完成，视频不上传；登录「参与研究」后才可选择上传到服务器分析。</p>
+  </header>
+  <div class="slip" role="note"><b>旧版演示</b>：本页在浏览器里算出的分数是与标准模板的相似度，2026-10 复核发现它与教练评分不相关，只用于演示动作捕捉效果，不代表动作水平，也不作为研究数据。参与研究请登录后用「上传到服务器分析」，或使用微信小程序。</div>
+  <div id="net">首次使用需联网加载 AI 模型（约 10MB），之后可离线使用</div>
+
+  <div class="grid">
+    <section class="stage-col" aria-label="评分方式">
+      <div class="tabs modes" role="group" aria-label="评分方式">
+        <button id="tabLive" class="on">实时 · 摄像头</button>
+        <button id="tabUpload" class="up">上传视频</button>
       </div>
-      <form id="rsForm" autocomplete="on">
-        <input type="text" id="rsName" autocomplete="username" maxlength="40">
-        <input id="rsPwd" type="password" maxlength="128" placeholder="密码（至少 6 位）">
-        <div id="rsRegOnly" style="display:none">
-          <input id="rsPwd2" type="password" autocomplete="new-password" maxlength="128" placeholder="再输一次密码">
-          <input type="text" id="rsInvite" autocomplete="off" maxlength="64" placeholder="邀请码（向教练要，如 TT-1A2B3C4D）">
-          <p class="rs-hint">登录名自己起、好记就行，换手机或电脑时用同一个账号登录。忘记密码请找教练重置。</p>
+
+      <div id="panelLive">
+        <div class="panel">
+          <div id="camwrap">
+            <video id="cam" muted playsinline></video>
+            <canvas id="camcv"></canvas>
+            <div class="stamp" id="stamp" role="status" aria-live="polite" hidden></div>
+          </div>
+          <div class="stage-idle" aria-hidden="true">
+            <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+              <g class="speed" id="speed"></g>
+              <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+                <g stroke="#2350e6" stroke-width="5" opacity=".28" transform="translate(-34 4)">
+                  <path d="M392 150 L380 245 L360 330 L340 420 M380 245 L410 330 L432 420 M392 175 L350 215 L318 250 M392 175 L440 210 L470 240"/>
+                </g>
+                <g stroke="#2350e6" stroke-width="5" opacity=".5" transform="translate(-16 2)">
+                  <path d="M392 150 L380 245 L360 330 L340 420 M380 245 L410 330 L432 420 M392 175 L350 205 L330 180 M392 175 L440 210 L470 240"/>
+                </g>
+                <path stroke="#f2efe6" stroke-width="6" d="M392 150 L380 245 L360 330 L340 420 M380 245 L410 330 L432 420 M392 175 L440 205 L498 196 M392 175 L350 215 L330 250"/>
+                <circle cx="392" cy="122" r="22" stroke="#f2efe6" stroke-width="6"/>
+                <g fill="#000" stroke="#d9281f" stroke-width="3">
+                  <circle cx="392" cy="175" r="6"/><circle cx="440" cy="205" r="6"/><circle cx="498" cy="196" r="7"/>
+                  <circle cx="380" cy="245" r="6"/><circle cx="360" cy="330" r="5"/><circle cx="410" cy="330" r="5"/>
+                </g>
+                <path d="M470 240 C 520 230, 540 200, 560 160" stroke="#5b86ff" stroke-width="2" stroke-dasharray="2 7"/>
+                <circle cx="575" cy="148" r="9" fill="#f2efe6"/>
+              </g>
+            </svg>
+            <p>开启摄像头后，这里显示骨架捕捉画面</p>
+          </div>
         </div>
-        <button type="submit" id="rsSubmit">登录</button>
-        <span id="rsMsg" class="rs-msg" role="status"></span>
-      </form>
-    </div>
-    <div id="rsIn" style="display:none" class="rs-in">
-      已登录：<b id="rsWho"></b> <button type="button" id="rsLogout" class="rs-mini">退出</button>
-    </div>
-    <p id="rsNote" class="rs-note" style="display:none" role="status"></p>
-  </section>
-  <div id="net">首次使用需联网加载 AI 模型（约10MB），之后可离线使用</div>
-
-  <div class="tabs">
-    <button id="tabLive" class="on">实时评分（摄像头）</button>
-    <button id="tabUpload">上传视频评分</button>
-  </div>
-
-  <div id="panelLive">
-    <button id="btnLiveStart">开启摄像头，开始实时评分</button>
-    <button id="btnLiveStop" class="danger" style="display:none">停止</button>
-    <button id="btnVoice" title="开启/关闭语音教练（默认开启）">🔊 语音开</button>
-    <div id="camwrap">
-      <video id="cam" muted playsinline></video>
-      <canvas id="camcv"></canvas>
-    </div>
-    <div id="orientHint">请将手机横屏放置 —— 横屏画面更宽、全身入镜更稳，手机可架近一些，语音也更清晰</div>
-    <div class="livebar">
-      <span id="liveStatus">未开启</span>
-      <span><button id="btnCamFlip" style="display:none;width:auto;padding:6px 14px;margin:0;font-size:13px">切换镜头</button>
-      <span id="liveFps"></span></span>
-    </div>
-    <p class="hint">浏览器会请求摄像头权限，请允许。建议<b>手机横屏放置</b>（画面更宽，可站近一些）。
-      全身入镜、侧面朝镜头、站稳后自然挥拍——就位后会自动播报「训练开始」，之后每次挥拍立即出分（约 0.2 秒），可连续练习。<br>
-      iPhone 提示：实时摄像头需用 <b>Safari 直接打开本页面</b>（微信/文件 App 内无法调用摄像头）；
-      手机自带的 http/文件页面可能不被允许调用摄像头，若无法开启，请用「上传视频」模式——
-      手机直接拍摄的 mp4 即可评分。</p>
-  </div>
-
-  <div id="panelUpload" style="display:none">
-    <div class="drop" id="drop">
-      <strong>点击选择或拖入视频文件</strong>
-      <p>建议：单个完整动作（引拍→击球→随挥），全身入镜，2-5秒</p>
-      <input type="file" id="file" accept="video/*" hidden>
-    </div>
-    <canvas id="detcv" style="display:none;width:100%;max-width:640px;border-radius:12px;margin-top:12px"></canvas>
-    <div id="fname"></div>
-    <button id="btn" disabled>开始评分（本地，不上传）</button>
-    <div id="rsUploadBox" class="rs-upload" style="display:none">
-      <div class="rs-head"><b>上传到服务器分析</b><span>与小程序同一套分析，结果存入你的训练记录。动作、机位用下方的选择。</span></div>
-      <div class="rs-grid">
-        <select id="rsTask"><option value="">训练任务（选填）</option><option>定点练习</option><option>对攻/推挡</option><option>多点移动</option><option>比赛/对抗</option><option>其他</option></select>
-        <select id="rsFeed"><option value="">喂球方式（选填）</option><option>多球</option><option>对练</option><option>发球机</option><option>自抛自打</option><option>其他</option></select>
+        <div id="orientHint">请把手机横屏放置：画面更宽、全身入镜更稳，手机可以架近一些，语音也更清楚</div>
+        <div class="livebar">
+          <span id="liveStatus">未开启</span>
+          <span><button id="btnCamFlip" class="btn ghost" style="display:none">切换镜头</button>
+          <span id="liveFps"></span></span>
+        </div>
+        <div class="actions">
+          <button id="btnLiveStart" class="btn">开启摄像头，开始实时捕捉</button>
+          <button id="btnLiveStop" class="btn stop danger" style="display:none">停止</button>
+          <button id="btnVoice" class="btn ghost" title="开启/关闭语音教练（默认开启）">🔊 语音开</button>
+        </div>
+        <p class="hint">浏览器会请求摄像头权限，请允许。建议<b>手机横屏</b>、全身入镜、侧面朝镜头，站稳后自然挥拍。
+          就位后会播报「训练开始」，之后每挥一拍约 0.2 秒出结果，可以连续练。<br>
+          iPhone 请用 <b>Safari 直接打开本页</b>（微信、文件 App 里无法调用摄像头）；开不了摄像头时改用「上传视频」，手机直接拍的 mp4 就行。</p>
       </div>
-      <label class="rs-consent"><input type="checkbox" id="rsShare"> 同意把这段视频交给教练评测。视频只给教练看（不显示你的账号），保留 90 天后自动删除，可随时撤回。</label>
-      <button type="button" id="rsUpload">上传到服务器分析</button>
-      <div id="rsStatus" class="rs-msg" role="status"></div>
-      <div id="rsResult" class="rs-result"></div>
-    </div>
-  </div>
 
-  <input type="text" id="uid" placeholder="昵称/学号（记录成长轨迹，存于本机）">
-  <select id="action">
-    <option value="自动">动作类型：自动判别</option>
-    <option value="正手攻球">正手攻球</option>
-    <option value="反手攻球">反手攻球</option>
-  </select>
-  <select id="angle" title="反手「手过低」仅在侧面机位可靠；自动判定靠面部可见度，判不出侧面">
-    <option value="自动">机位：自动</option>
-    <option value="正面">机位：正面</option>
-    <option value="侧面">机位：侧面</option>
-    <option value="偏侧面">机位：偏侧面</option>
-    <option value="后45度">机位：后45度</option>
-  </select>
-  <div class="report-box" id="reportBox">
-    <span class="report-title">📤 实验数据上报（可选 · 匿名，仅上传分数/特征/诊断）</span>
-    <input type="text" id="reportCode" placeholder="参与码（如 P001）" autocomplete="off">
-    <input type="password" id="reportPwd" placeholder="密码" autocomplete="off">
-    <button id="reportLogin" type="button">登录上报</button>
-    <button id="reportLogout" type="button" style="display:none">退出</button>
-    <span id="reportStatus" class="report-status"></span>
-  </div>
-  <div id="status"></div>
-  <div id="err"></div>
+      <div id="panelUpload" style="display:none">
+        <div class="drop" id="drop">
+          <strong>点击选择或拖入视频文件</strong>
+          <p>单个完整动作（引拍 → 击球 → 随挥），全身入镜，2–5 秒</p>
+          <input type="file" id="file" accept="video/*" hidden>
+        </div>
+        <canvas id="detcv" style="display:none;width:100%;max-width:640px;margin-top:12px"></canvas>
+        <div id="fname"></div>
+        <div class="actions">
+          <button id="btn" class="btn" disabled>开始评分（本地，不上传）</button>
+        </div>
+        <div id="rsUploadBox" class="box rs-upload" style="display:none">
+          <h2>上传到服务器分析</h2>
+          <p class="rs-hint">与小程序同一套分析，结果存入你的训练记录。动作、机位用右侧「这一组练什么」里的选择。</p>
+          <div class="rs-grid">
+            <label>训练任务<select id="rsTask"><option value="">选填</option><option>定点练习</option><option>对攻/推挡</option><option>多点移动</option><option>比赛/对抗</option><option>其他</option></select></label>
+            <label>喂球方式<select id="rsFeed"><option value="">选填</option><option>多球</option><option>对练</option><option>发球机</option><option>自抛自打</option><option>其他</option></select></label>
+          </div>
+          <label class="rs-consent"><input type="checkbox" id="rsShare"> 同意把这段视频交给教练评测。视频只给教练看（不显示你的账号），保留 90 天后自动删除，可随时撤回。</label>
+          <button type="button" id="rsUpload" class="btn">上传到服务器分析</button>
+          <div id="rsStatus" class="rs-msg" role="status"></div>
+          <div id="rsResult" class="rs-result"></div>
+        </div>
+      </div>
+    </section>
 
-  <div class="report-box" id="reviewBox" style="display:none">
-    <span class="report-title">🧪 结果反馈（帮助改进算法）</span>
-    <button id="reviewAgree" type="button">评分和动作都符合</button>
-    <button id="reviewDisagree" type="button">有不一致，提交教练复核</button>
-    <label id="reviewConsent" style="display:none;width:100%;color:#bbb"><input id="reviewVideoConsent" type="checkbox"> 我同意上传本次视频，仅供教练复核与算法优化</label>
-    <input id="reviewNote" type="text" placeholder="可选：你认为正确的评分或动作类型" style="display:none">
-    <button id="reviewSubmit" type="button" style="display:none">提交含视频的复核申请</button>
-    <span id="reviewStatus" class="report-status"></span>
-  </div>
+    <aside class="side">
+      <div class="box settings">
+        <h2>这一组练什么</h2>
+        <div class="fields">
+          <label class="full">昵称或学号（只存在本机，用来画成长曲线）<input type="text" id="uid" placeholder="例如 xsm"></label>
+          <label>动作<select id="action">
+            <option value="自动">自动判别</option>
+            <option value="正手攻球">正手攻球</option>
+            <option value="反手攻球">反手攻球</option>
+          </select></label>
+          <label>机位<select id="angle" title="反手「手过低」仅在侧面机位可靠；自动判定靠面部可见度，判不出侧面">
+            <option value="自动">自动</option>
+            <option value="正面">正面</option>
+            <option value="侧面">侧面</option>
+            <option value="偏侧面">偏侧面</option>
+            <option value="后45度">后45度</option>
+          </select></label>
+        </div>
+      </div>
 
-  <div id="result">
-    <div class="score-wrap">
-      <div class="score"><span id="score">--</span><small> / 100</small></div>
-      <div class="meta">模板相似度（演示，未经教练评分验证）</div>
-      <div class="grade" id="grade"></div>
-      <div class="meta" id="meta"></div>
-    </div>
-    <h3>各关节与模板的相似度（演示）</h3>
-    <div id="joints"></div>
-    <div class="feedback" id="feedback"></div>
-    <div id="forcebox">
-      <h3>发力方式</h3>
-      <div class="force-grade" id="forceGrade"></div>
-      <div class="joint"><div class="lbl"><span>持拍侧肩速</span><span id="forceSh"></span></div>
-        <div class="bar"><i id="forceShBar" style="width:0%"></i></div></div>
-      <div class="joint"><div class="lbl"><span>持拍侧髋速</span><span id="forceHip"></span></div>
-        <div class="bar"><i id="forceHipBar" style="width:0%"></i></div></div>
-      <div class="joint"><div class="lbl"><span>持拍侧腕速</span><span id="forceWr"></span></div>
-        <div class="bar"><i id="forceWrBar" style="width:0%"></i></div></div>
-      <div class="force-tip" id="forceTip"></div>
-    </div>
-    <div id="diagbox">
-      <h3>动作诊断</h3>
-      <div class="diag-grade" id="diagGrade"></div>
-      <div class="diag-chain" id="diagChain"></div>
-      <div class="diag-evidence" id="diagEvidence"></div>
-      <div class="diag-tip" id="diagTip"></div>
-      <div class="diag-drill" id="diagDrill"></div>
-      <div class="diag-verify" id="diagVerify"></div>
-      <details class="diag-ranked"><summary>查看本次全部问题（<span id="diagCount"></span> 项）</summary>
-        <ul id="diagRanked"></ul></details>
-    </div>
-    <div id="coachbox">
-      <div class="hd"><span id="stage"></span><span id="lp"></span></div>
-      <div class="bar"><i id="lpbar" style="width:0%"></i></div>
-      <div id="coaching"></div>
-    </div>
+      <section class="box research" id="researchBox" aria-label="参与研究">
+        <h2>参与研究</h2>
+        <p class="rs-hint">可选。不登录时本页完全离线，什么都不上传。</p>
+        <div id="rsOff" style="display:none" class="rs-hint">参与研究请在 <a href="https://ttcoach.cn/web/">ttcoach.cn/web</a> 打开本页，或使用微信小程序。</div>
+        <div id="rsAuth">
+          <div class="rs-tabs" role="group" aria-label="登录或注册">
+            <button type="button" id="rsTabLogin" class="on">登录</button>
+            <button type="button" id="rsTabReg">第一次使用：注册</button>
+          </div>
+          <form id="rsForm" autocomplete="on">
+            <input type="text" id="rsName" autocomplete="username" maxlength="40">
+            <input id="rsPwd" type="password" maxlength="128" placeholder="密码（至少 6 位）">
+            <div id="rsRegOnly" style="display:none">
+              <input id="rsPwd2" type="password" autocomplete="new-password" maxlength="128" placeholder="再输一次密码">
+              <input type="text" id="rsInvite" autocomplete="off" maxlength="64" placeholder="邀请码（向教练要，如 TT-1A2B3C4D）">
+              <p class="rs-hint">登录名自己起、好记就行，换手机或电脑时用同一个账号登录。忘记密码请找教练重置。</p>
+            </div>
+            <button type="submit" id="rsSubmit" class="btn">登录</button>
+            <span id="rsMsg" class="rs-msg" role="status"></span>
+          </form>
+        </div>
+        <div id="rsIn" style="display:none" class="rs-in">
+          已登录：<b id="rsWho"></b> <button type="button" id="rsLogout" class="rs-mini">退出</button>
+        </div>
+        <p id="rsNote" class="rs-note" style="display:none" role="status"></p>
+      </section>
+
+      <div class="report-box" id="reportBox">
+        <span class="report-title">实验数据上报（可选 · 匿名，仅上传分数/特征/诊断）</span>
+        <input type="text" id="reportCode" placeholder="参与码（如 P001）" autocomplete="off">
+        <input type="password" id="reportPwd" placeholder="密码" autocomplete="off">
+        <button id="reportLogin" type="button">登录上报</button>
+        <button id="reportLogout" type="button" style="display:none">退出</button>
+        <span id="reportStatus" class="report-status"></span>
+      </div>
+      <div id="status" role="status"></div>
+      <div id="err" role="alert"></div>
+
+      <div class="report-box" id="reviewBox" style="display:none">
+        <span class="report-title">结果反馈（帮助改进算法）</span>
+        <button id="reviewAgree" type="button">评分和动作都符合</button>
+        <button id="reviewDisagree" type="button">有不一致，提交教练复核</button>
+        <label id="reviewConsent" style="display:none;width:100%"><input id="reviewVideoConsent" type="checkbox"> 我同意上传本次视频，仅供教练复核与算法优化</label>
+        <input id="reviewNote" type="text" placeholder="可选：你认为正确的评分或动作类型" style="display:none">
+        <button id="reviewSubmit" type="button" style="display:none">提交含视频的复核申请</button>
+        <span id="reviewStatus" class="report-status"></span>
+      </div>
+
+      <div id="result">
+        <div id="diagbox" class="box diag">
+          <h2>动作诊断</h2>
+          <div class="diag-grade" id="diagGrade"></div>
+          <div class="diag-chain" id="diagChain"></div>
+          <div class="diag-evidence" id="diagEvidence"></div>
+          <div class="diag-tip" id="diagTip"></div>
+          <div class="diag-drill" id="diagDrill"></div>
+          <div class="diag-verify" id="diagVerify"></div>
+          <details class="diag-ranked"><summary>查看本次全部问题（<span id="diagCount"></span> 项）</summary>
+            <ul id="diagRanked"></ul></details>
+        </div>
+        <div id="forcebox" class="box force">
+          <h2>发力方式</h2>
+          <div class="force-grade" id="forceGrade"></div>
+          <div class="joint"><div class="lbl"><span>持拍侧肩速</span><span id="forceSh"></span></div>
+            <div class="bar"><i id="forceShBar" style="width:0%"></i></div></div>
+          <div class="joint"><div class="lbl"><span>持拍侧髋速</span><span id="forceHip"></span></div>
+            <div class="bar"><i id="forceHipBar" style="width:0%"></i></div></div>
+          <div class="joint"><div class="lbl"><span>持拍侧腕速</span><span id="forceWr"></span></div>
+            <div class="bar"><i id="forceWrBar" style="width:0%"></i></div></div>
+          <div class="force-tip" id="forceTip"></div>
+        </div>
+        <div class="box sim">
+          <div class="score-wrap">
+            <div class="score"><span id="score">--</span></div>
+            <div class="what">模板相似度（演示）<br>与标准模板的形状接近程度，未经教练评分验证<span class="grade" id="grade"></span></div>
+          </div>
+          <div class="meta" id="meta"></div>
+          <h3>各关节与模板的相似度</h3>
+          <div id="joints"></div>
+          <div class="feedback" id="feedback"></div>
+        </div>
+        <div id="coachbox" class="box">
+          <div class="hd"><span id="stage"></span><span id="lp"></span></div>
+          <div class="bar"><i id="lpbar" style="width:0%"></i></div>
+          <div id="coaching"></div>
+        </div>
+      </div>
+    </aside>
   </div>
   <video id="vid" muted playsinline></video>
   <canvas id="cv" style="display:none"></canvas>
-</div>
+</main>
 
 <script>
-/* 冠军背景轮播：JS 定时器均分，每张图展示时长严格一致（7s 展示 + 1s 淡入淡出） */
+/* 背景飞溅墨点与速度线：确定性伪随机，每次加载一样，不依赖图片 */
 (function () {
-  var imgs = document.querySelectorAll('.bg-champion img');
-  if (!imgs.length) return;
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    imgs[0].classList.add('show');
-    return;
+  var s = 7; function r() { s = (s * 16807) % 2147483647; return s / 2147483647; }
+  var h = "", i;
+  for (i = 0; i < 70; i++) {
+    var band = r() < .6 ? 330 : 640, x = 380 + r() * 640, y = band + (r() - .5) * (60 + (x - 380) * .35);
+    var rad = r() < .9 ? r() * 1.8 + .4 : r() * 4 + 1.5;
+    h += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + rad.toFixed(1) + '" opacity="' + (.25 + r() * .6).toFixed(2) + '"/>';
   }
-  var DWELL = 8000; // 每张图完整展示 8 秒，四张严格均分
-  var cur = 0;
-  imgs[0].classList.add('show');
-  setInterval(function () {
-    imgs[cur].classList.remove('show');
-    cur = (cur + 1) % imgs.length;
-    imgs[cur].classList.add('show');
-  }, DWELL);
+  document.getElementById("splat").innerHTML = h;
+  var l = "";
+  for (i = 0; i < 26; i++) {
+    var yy = r() * 500, xx = 560 + r() * 240, w = 60 + r() * 220;
+    l += '<line x1="' + xx + '" y1="' + yy + '" x2="' + (xx - w) + '" y2="' + (yy + w * .12) + '" stroke="#f2efe6" stroke-width="' + (r() * 1.6 + .3).toFixed(2) + '" opacity="' + (.08 + r() * .25).toFixed(2) + '"/>';
+  }
+  document.getElementById("speed").innerHTML = l;
 })();
 </script>
 <script src="js/templates.js"></script>
@@ -216,5 +273,6 @@
 <script src="js/ui.js"></script>
 <script src="js/report.js"></script>
 <script src="js/research.js"></script>
+<script src="js/stamp.js"></script>
 </body>
 </html>
