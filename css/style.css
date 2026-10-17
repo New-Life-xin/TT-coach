@@ -39,6 +39,15 @@ a { color: var(--cobalt-hi); }
 .mast .sub { color: var(--mist); max-width: 34em; margin-bottom: 6px; font-size: 14px; }
 .mast .sub, .hint, .livebar, #fname, .modes button:not(.on) { text-shadow: 0 0 4px #000, 0 0 8px #000; }
 
+/* 手机横屏（矮屏）：压缩标题区，让摄像头画面尽量出现在第一屏 */
+@media (max-height: 520px) and (orientation: landscape) {
+  .wrap { padding-top: 8px; }
+  .mast { margin: 0 0 8px; }
+  .mast h1 { font-size: 28px; }
+  .mast .sub { display: none; }
+  .slip { font-size: 12px; padding: 5px 10px; margin-bottom: 10px; }
+}
+
 /* 旧版说明：斜贴的纸条 */
 .slip { display: inline-block; margin: 0 0 20px; padding: 9px 14px 9px 16px; max-width: 62em;
   background: var(--paper); color: #1a1a1a; font-size: 13.5px; line-height: 1.6; transform: rotate(-.6deg);

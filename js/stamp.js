@@ -28,6 +28,16 @@
     } catch (e) { /* 展示失败不影响评分 */ }
     return out;
   };
+  // 摄像头画面出现时把它滚到屏幕顶部（手机横屏时标题区会占掉大半屏；模型首次加载可能要等几秒）
+  var cw = document.getElementById("camwrap"), panel = document.querySelector("#panelLive .panel");
+  if (cw && panel && window.MutationObserver) {
+    var shown = false;
+    new MutationObserver(function () {
+      var on = cw.style.display === "block";
+      if (on && !shown) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      shown = on;
+    }).observe(cw, { attributes: true, attributeFilter: ["style"] });
+  }
   // 停止摄像头后计数清零
   var stop = document.getElementById("btnLiveStop");
   if (stop) stop.addEventListener("click", function () { n = 0; stamp.hidden = true; });
