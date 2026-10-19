@@ -9,6 +9,7 @@
      POST /auth/register  POST /auth/token  POST /auth/refresh
      POST /videos（multipart）→ {task_id}   GET /tasks/{id}   POST /tasks/{id}/sync
      DELETE /coach/items/student/{session_id}/video  撤回交给教练的视频
+     GET /coach/my/submissions  我交给教练的视频与教练评价；GET /coach/my/submissions/{id}/video-url 看自己的视频
    仅在 ttcoach.cn 同源页面可用（分析服务不开放跨域）；本地调试可在 index.html 里声明
    window.RESEARCH_CONFIG = { base: "http://127.0.0.1:8000" }。 */
 (function () {
@@ -171,7 +172,7 @@
         var r = await api("/tasks/" + encodeURIComponent(tid));
         if (r.status === 404) { clearInterval(polling); ldel(K.task); st.textContent = "任务已过期"; $("rsUpload").disabled = false; return; }
         var t = await r.json();
-        if (t.status === "done") { clearInterval(polling); ldel(K.task); st.textContent = "完成"; setRetest(null); showResult(tid, t); $("rsUpload").disabled = false; loadRx(); }
+        if (t.status === "done") { clearInterval(polling); ldel(K.task); st.textContent = "完成"; setRetest(null); showResult(tid, t); $("rsUpload").disabled = false; loadRx(); loadMine(); }
         else if (t.status === "failed" || t.status === "interrupted") {
           clearInterval(polling); ldel(K.task); $("rsUpload").disabled = false;
           st.textContent = t.error || "分析失败";
@@ -222,7 +223,7 @@
       w.disabled = true;
       try {
         var res = await api("/coach/items/student/" + encodeURIComponent(r.backend_session_id) + "/video", { method: "DELETE" });
-        if (res.ok || res.status === 204) { w.replaceWith(document.createTextNode("（已撤回，视频已删除）")); }
+        if (res.ok || res.status === 204) { w.replaceWith(document.createTextNode("（已撤回，视频已删除）")); loadMine(); }
         else { w.disabled = false; alert(await detail(res) || "撤回失败"); }
       } catch (e) { w.disabled = false; }
     };
@@ -379,6 +380,87 @@
     } catch (e) { msg.textContent = e.message || "提交失败，请稍后再试"; btn.disabled = false; }
   }
 
+  // ---------------------------------------------------------------- 我的教练评测
+  // 学员交给教练的视频与教练评价（分档、问题标签、备注）。不显示系统分档，也不显示是哪位教练评的。
+  var BAND_CN = { "90+": "90 分以上", "80-89": "80–89 分", "70-79": "70–79 分", "60-69": "60–69 分", "<60": "60 分以下" };
+  var SUB_STATE = { pending: "等待教练评测", reviewed: "教练已评", reviewed_private: "教练已评（这条评价不公开）" };
+  function two(n) { return (n < 10 ? "0" : "") + n; }
+  function fmtTime(s, dateOnly) {
+    // 老版 Safari 不认识超过 3 位的小数秒，先截到毫秒
+    var d = new Date(String(s).replace(/(\.\d{3})\d+/, "$1")); if (!s || isNaN(d)) return "";
+    return (d.getMonth() + 1) + "月" + d.getDate() + "日" + (dateOnly ? "" : " " + two(d.getHours()) + ":" + two(d.getMinutes()));
+  }
+  function subCard(s) {
+    var f = s.feedback, h = '<div class="rs-sub' + (f ? " done" : "") + '" data-item="' + esc(s.item_id) + '">';
+    h += '<div class="rs-sub-top"><b>' + esc(s.action) + "</b><span>" + esc(fmtTime(s.submitted_at)) + " 提交</span>" +
+      '<span class="rs-sub-state">' + esc(SUB_STATE[s.status] || s.status) + "</span></div>";
+    var names = function (xs) { return xs.map(function (x) { return esc(x.name); }).join("；"); };
+    if (f) {
+      if (f.unjudgeable) {
+        h += '<div class="rs-band">教练这次没法评<small>不是动作的问题</small></div>';
+        if (f.flags.length) h += "<p>原因：" + names(f.flags) + "</p>";
+        h += "<p>下次拍摄：全身入镜、机位固定，一段视频只拍一种动作。</p>";
+      } else {
+        h += '<div class="rs-band">' + esc(BAND_CN[f.band] || f.band) + "<small>教练评定的技术水平</small></div>";
+        h += f.tags.length ? "<p>最需要改进：" + f.tags.map(function (t) {
+          return '<span class="rs-tag">' + esc(t.name) + "</span>" + (t.hint ? "（" + esc(t.hint) + "）" : "");
+        }).join("；") + "</p>" : "<p>教练认为没有明显需要先改的问题。</p>";
+        if (f.flags.length) h += "<p>另外：" + names(f.flags) + "</p>";
+      }
+      if (f.note) h += '<div class="rs-say">教练说：' + esc(f.note) + "</div>";
+      if (f.reviewed_at) h += "<p>" + esc(fmtTime(f.reviewed_at)) + " 评定</p>";
+    } else if (s.status === "pending") h += "<p>教练评完后会显示在这里。</p>";
+    h += '<div class="rs-sub-vid">';
+    if (s.video_status === "available") {
+      h += '<button type="button" class="rs-mini" data-sub-play>看视频</button>' +
+        (s.session_id ? '<button type="button" class="rs-mini" data-sub-withdraw="' + esc(s.session_id) + '">撤回视频</button>' : "") +
+        (s.video_expires_at ? " 视频保留到 " + esc(fmtTime(s.video_expires_at, true)) : "");
+    } else h += s.video_status === "expired" ? "视频已过保留期，已删除" : "视频已撤回";
+    return h + "</div></div>";
+  }
+  async function loadMine() {
+    var box = $("rsMine"), list = $("rsMineList");
+    if (!box) return;
+    if (!lget(K.access)) { box.style.display = "none"; return; }
+    try {
+      var r = await api("/coach/my/submissions");
+      if (!r.ok) { box.style.display = "none"; return; }
+      var j = await r.json();
+      box.style.display = "";
+      list.innerHTML = j.items.length ? j.items.map(subCard).join("")
+        : '<p class="rs-hint">还没有交给教练的视频。上传时勾选「同意把这段视频交给教练评测」，教练评完后会显示在这里。</p>';
+      bindMine(list);
+    } catch (e) { /* 数据后端不可用时不影响其他功能 */ }
+  }
+  function bindMine(scope) {
+    scope.querySelectorAll("[data-sub-play]").forEach(function (b) {
+      b.onclick = async function () {
+        var card = b.closest(".rs-sub"), v = card.querySelector("video");
+        if (v) { v.pause(); v.remove(); b.textContent = "看视频"; return; }
+        b.disabled = true;
+        try {
+          var r = await api("/coach/my/submissions/" + encodeURIComponent(card.getAttribute("data-item")) + "/video-url");
+          if (!r.ok) { alert(await detail(r) || "视频打不开"); return; }
+          v = document.createElement("video");
+          v.controls = true; v.playsInline = true; v.preload = "metadata";
+          v.src = BASE + (await r.json()).video_url;
+          card.appendChild(v); b.textContent = "收起视频";
+        } catch (e) { alert("网络不稳定，请稍后再试"); }
+        finally { b.disabled = false; }
+      };
+    });
+    scope.querySelectorAll("[data-sub-withdraw]").forEach(function (b) {
+      b.onclick = async function () {
+        if (!confirm("撤回后视频会从服务器删除，教练也看不到了；已有的教练评价会保留。确定撤回？")) return;
+        b.disabled = true;
+        try {
+          var r = await api("/coach/items/student/" + encodeURIComponent(b.getAttribute("data-sub-withdraw")) + "/video", { method: "DELETE" });
+          if (r.ok || r.status === 204) loadMine(); else { b.disabled = false; alert(await detail(r) || "撤回失败"); }
+        } catch (e) { b.disabled = false; }
+      };
+    });
+  }
+
   // ---------------------------------------------------------------- 教练审核入口
   // 已登录的教练 / 研究者：带上当前登录状态直接进入审核页（同一网站，不用再登录一次）
   function goCoach(e) {
@@ -405,6 +487,7 @@
     var staff = !!(u && ["coach", "researcher", "admin"].indexOf(u.role) >= 0);
     var cb = $("rsCoach"); if (cb) cb.style.display = staff ? "" : "none";
     var list = $("rsRxList"); if (list) { if (u) loadRx(); else list.innerHTML = ""; }
+    loadMine();
     // 早先登录时没记下角色：向服务器补问一次（兑换教练码后角色也会变）
     if (u && !u.role && !render._asked) {
       render._asked = true;
@@ -423,6 +506,7 @@
     $("rsUpload").onclick = startUpload;
     $("rsRetestCancel").onclick = function () { setRetest(null); };
     $("rsFbSubmit").onclick = submitFeedback;
+    var mr = $("rsMineRefresh"); if (mr) mr.onclick = loadMine;
     ["rsCoach", "coachLink"].forEach(function (id) { var a = $(id); if (a) a.addEventListener("click", goCoach); });
     setForm("login");
     render();

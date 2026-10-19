@@ -244,6 +244,25 @@ video { display: none; }
   color: var(--paper); padding: 8px 10px; cursor: pointer; font-size: 13px; }
 .rs-rx-item b { font: 700 16px var(--kai); color: var(--gold); }
 .rs-rx-item span { color: var(--mist); }
+/* 我的教练评测 */
+.rs-mine { margin-top: 16px; }
+.rs-mine h3 { margin: 0 0 2px; font: 700 18px var(--kai); color: var(--paper); }
+.rs-mine > .rs-hint { margin: 0 0 8px; }
+.rs-mine-list { display: grid; gap: 10px; }
+.rs-sub { padding: 10px 12px; border-left: 3px solid #3a4050; background: rgba(13, 15, 20, .9); font-size: 14px; color: var(--mist); }
+.rs-sub.done { border-left-color: var(--cobalt-hi); }
+.rs-sub-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.rs-sub-top b { color: var(--paper); }
+.rs-sub-state { margin-left: auto; font-size: 12px; }
+.rs-sub.done .rs-sub-state { color: var(--ok); }
+.rs-band { margin: 6px 0 2px; font: 700 26px/1.2 var(--kai); color: var(--paper); }
+.rs-band small { font: 13px var(--sans); color: var(--mist); margin-left: 6px; }
+.rs-sub p { margin: 4px 0; }
+.rs-sub .rs-tag { color: var(--paper); font-weight: 600; }
+.rs-sub .rs-say { color: var(--paper); padding: 6px 10px; margin: 6px 0; border-left: 2px solid var(--gold); background: rgba(229, 182, 43, .06); white-space: pre-wrap; }
+.rs-sub-vid { margin-top: 6px; font-size: 13px; }
+.rs-sub-vid .rs-mini:first-child { margin-left: 0; }
+.rs-sub video { display: block; width: 100%; max-height: 60vh; margin-top: 8px; background: #000; }
 .rs-coach { display: inline-block; margin-top: 12px; text-decoration: none; font-size: 14px; padding: 7px 16px; }
 .rs-retest { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--gold); background: rgba(229, 182, 43, .08); }
 .rs-retest b { font: 700 17px var(--kai); color: var(--gold); }
