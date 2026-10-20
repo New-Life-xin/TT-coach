@@ -27,7 +27,7 @@ async function initModel(){
     // 运行时优先走本站同源 assets/mp/（零跨域、可缓存），失败回退 jsDelivr CDN
     const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
     try {
-      vision = await import("./assets/mp/vision_bundle.mjs");
+      vision = await import("../assets/mp/vision_bundle.mjs");
       fileset = await vision.FilesetResolver.forVisionTasks("./assets/mp/wasm");
     } catch (e) {
       vision = await import(`${CDN}/+esm`);
