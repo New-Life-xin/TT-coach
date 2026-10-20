@@ -17,7 +17,7 @@
   var CFGB = window.RESEARCH_CONFIG && window.RESEARCH_CONFIG.base;
   var BASE = CFGB != null ? CFGB : (location.hostname === "ttcoach.cn" ? "" : null);
   var API = "/api/v1";
-  var MAX_MB = 50, MAX_SEC = 60, POLL_MS = 2000, POLL_MAX = 150;
+  var MAX_MB = 50, MAX_SEC = 60, POLL_MS = 2000, POLL_MAX = 300;   // 10 分钟：服务端排队分析
   var K = { access: "tt_r_access", refresh: "tt_r_refresh", user: "tt_r_user", task: "tt_r_task" };
 
   function $(id) { return document.getElementById(id); }
@@ -161,7 +161,7 @@
       poll(j.task_id);
     } catch (err) { st.textContent = err.message; $("rsUpload").disabled = false; }
   }
-  var STATUS = { queued: "排队中", running: "服务器分析中" };
+  var STATUS = { queued: "排队中", running: "服务器分析中" };   // 排队时 note 是「前面还有 N 段，预计约 M 分钟」
   function poll(tid) {
     var n = 0, st = $("rsStatus");
     clearInterval(polling);
@@ -176,7 +176,8 @@
         else if (t.status === "failed" || t.status === "interrupted") {
           clearInterval(polling); ldel(K.task); $("rsUpload").disabled = false;
           st.textContent = t.error || "分析失败";
-        } else st.textContent = (STATUS[t.status] || t.status) + (t.progress ? " " + t.progress + "%" : "") + (t.note ? " · " + t.note : "");
+        } else if (t.status === "queued" && t.note) st.textContent = t.note;
+        else st.textContent = (STATUS[t.status] || t.status) + (t.progress ? " " + t.progress + "%" : "") + (t.note ? " · " + t.note : "");
       } catch (e) { st.textContent = "网络不稳定，正在重试…"; }
     }, POLL_MS);
   }
