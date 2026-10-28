@@ -16,11 +16,21 @@
      （improving 话术）→ 错误消失表扬一次后、持续良好即静默；同一错误无改善时
      每 2 拍才重复纠正一次，避免每拍唠叨。
 
-   组间总结（每 10 拍）与训练后总结（点「停止」时）：
-   - 也仅对非 guest 生效（匿名只播纠错，不播任何总结）。
+   组间总结（每 GROUP_SIZE 拍）与训练后总结（点「停止」时）：
+   - 2026-10-26 起对所有用户（含 guest）生效：只报拍数与反复出现的问题，不涉及个人成绩历史。
+   - 「一定出声」（2026-10-26，答辩前）：组间总结在没有反复出现的问题时也播一句
+     「这一组没发现明显问题」（不说「动作很好」——规则只覆盖少数问题，没检出≠没问题）；
+     连续 SILENT_MAX 拍没出声时补一句简短的「继续」，避免练很久听不到任何声音。
+   - 新增话术若 mp3 尚未合成，自动用浏览器 TTS 读 VOICE_TEXT 里的文字兜底。
    - 组内/会话统计放内存（_group/_session），跨训练由 voiceResetSession 清空。 */
 
 const VOICE_BASE = "assets/voice/";
+
+// 新增话术的文字（mp3 未合成或加载失败时用浏览器 TTS 兜底；合成：工具/tts_xfyun.py --only=grp_c）
+const VOICE_TEXT = {
+  grp_clean: "这一组没发现明显问题，继续保持。",
+  grp_clean_short: "继续，保持节奏。",
+};
 
 // 各错误的状态话术文件名（对照 工具/voice_scripts.json）
 // improving = 「已有改善」话术（2026-09-10 起启用：改善就表扬，像真实教练）；
@@ -48,7 +58,8 @@ const IMPROVE_SCORE = 5;    // 分数较上一拍提升 ≥5 分视为「改善�
 const IMPROVE_CONF  = 0.10; // 或错误置信度下降 ≥0.10 视为「改善」（错误指标向达标靠拢）
 const REP_EVERY = 2;        // 同一错误无改善时，每 2 拍才重复纠正一次，其余静默
 
-const GROUP_SIZE = 10;        // 组间总结：每 10 拍
+const GROUP_SIZE = 6;         // 组间总结：每 6 拍（2026-10-26 由 10 改 6，学员一组多拍不到 10 拍）
+const SILENT_MAX = 4;         // 连续 4 拍没出声 → 补一句「继续」
 const MIN_SESSION_SHOTS = 3;  // 训练后总结：至少 3 拍才算一次训练
 
 // 会话统计（内存，startLive 重置，stopLive 播完清空）
@@ -56,7 +67,8 @@ function _newSession(){ return { shots:0, scores:[], errCount:{}, best:0, tierId
 function _newGroup(){ return { scores:[], errCount:{} }; }
 let _session = _newSession();
 let _group = _newGroup();
-function voiceResetSession(){ _session = _newSession(); _group = _newGroup(); }
+let _silent = 0;   // 连续没出声的拍数
+function voiceResetSession(){ _session = _newSession(); _group = _newGroup(); _silent = 0; }
 
 function voiceSetEnabled(on){
   VOICE.enabled = !!on;
@@ -94,7 +106,8 @@ function voicePlay(ids){
     VOICE._cur = a;
     a.volume = 1.0;
     a.onended = next;
-    a.onerror = next;
+    const id = ids[i];
+    a.onerror = () => { if (VOICE_TEXT[id]) _ttsSay(VOICE_TEXT[id], next); else next(); };
     i++;
     a.play().catch(() => {
       // 自动播放策略可能拦截：先解锁音频再重试一次，仍失败才跳过下一条
@@ -104,6 +117,18 @@ function voicePlay(ids){
   next();
 }
 
+// 浏览器 TTS 兜底（不少微信内置浏览器没有中文语音包，可能无声；正式话术仍以 mp3 为准）
+function _ttsSay(text, done){
+  try {
+    if (!window.speechSynthesis){ done && done(); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "zh-CN"; u.rate = 0.95; u.volume = 1;
+    let fired = false; const fin = () => { if (!fired){ fired = true; done && done(); } };
+    u.onend = fin; u.onerror = fin; setTimeout(fin, 4000);
+    speechSynthesis.speak(u);
+  } catch(e){ done && done(); }
+}
+
 // 预先下载常用话术（双文件版）：每段 mp3 第一次播放要先从服务器下载，实测 0.3–2.3 秒，
 // 会让纠错语音明显落后于动作。开启摄像头时把开场与四类纠错话术（约 0.4MB）先下到浏览器缓存。
 let _voiceWarmed = false;
@@ -111,7 +136,7 @@ function voiceWarm(){
   if (_voiceWarmed || window.VOICE_B64) return;
   _voiceWarmed = true;
   if (navigator.connection && navigator.connection.saveData) return;   // 省流量模式不预下载
-  const ids = ["evt_start"];
+  const ids = ["evt_start", "grp_clean", "grp_clean_short", "grp_weak", "grp_next"];
   for (const e in ERR_VOICE){
     const v = ERR_VOICE[e];
     [v.first, ...v.rep, v.improving, v.resolved].forEach(x => { if (x && ids.indexOf(x) < 0) ids.push(x); });
@@ -205,13 +230,12 @@ function _topFromCount(count){
 // 只总结这一组最常出现的问题；没有反复出现的问题就不播（「没检出」不等于动作没问题，规则覆盖有限）
 function _groupSummary(){
   const top = _topFromCount(_group.errCount);
-  return top ? ["grp_weak", "err_name_" + top.id, "grp_next", "err_focus_" + top.id] : null;
+  return top ? ["grp_weak", "err_name_" + top.id, "grp_next", "err_focus_" + top.id] : ["grp_clean"];
 }
 
 // 训练后总结（点停止时）：总拍数 + 平均分 + 段位变化 + 短板 + 下次重点
 function voiceSessionSummary(uid){
-  const isGuest = !uid || uid === "guest";
-  if (isGuest || _session.shots < MIN_SESSION_SHOTS){ voiceResetSession(); return null; }
+  if (_session.shots < MIN_SESSION_SHOTS){ voiceResetSession(); return null; }
   // 只报拍数和最常出现的问题；不报平均分、不报段位（都来自未经验证的模板相似度）
   const ids = ["sum_total", "nump_" + Math.min(_session.shots, 100), "sum_pai"];
   const top = _topFromCount(_session.errCount);
@@ -255,13 +279,10 @@ function _errFeedback(errId, score, conf){
 // 优先级：组间总结（有反复出现的问题时）> 首要错误纠正 / 改善表扬 > 错误消失肯定 > 静默
 // （原「疲劳 / 破最佳 / 连续进步」依赖模板相似度分数，2026-10-17 起停用）
 function voiceFeedback(uid, score, diag, ladder){
-  const isGuest = !uid || uid === "guest";
   const errId = (diag && diag.top) ? diag.top.id : null;
   const errConf = (diag && diag.top) ? diag.top.confidence : null;
 
-  if (isGuest) return _errFeedback(errId, score, errConf);   // 匿名：只纠错，无统计/总结
-
-  // ---- 会话 + 组统计（非 guest）----
+  // ---- 会话 + 组统计（2026-10-26 起含 guest：只统计拍数和问题次数，不进个人历史）----
   _session.shots++;
   _session.scores.push(score);
   _session.best = Math.max(_session.best, score);
@@ -273,12 +294,17 @@ function voiceFeedback(uid, score, diag, ladder){
   _group.scores.push(score);
   if (errId) _group.errCount[errId] = (_group.errCount[errId] || 0) + 1;
 
-  // ---- 组间总结：满 10 拍时，如有反复出现的问题，优先于单拍纠错 ----
+  let ids = null;
+  // ---- 组间总结：满 GROUP_SIZE 拍一定播一次（有反复问题报问题，否则报「没发现明显问题」）----
   if (_group.scores.length >= GROUP_SIZE){
-    const ids = _groupSummary();
+    ids = _groupSummary();
     _group = _newGroup();
-    if (ids){ _errAdvance(errId, score, errConf); return ids; }
+    _errAdvance(errId, score, errConf);
+  } else {
+    ids = _errFeedback(errId, score, errConf);
   }
-
-  return _errFeedback(errId, score, errConf);
+  // ---- 兜底：连续 SILENT_MAX 拍没出声，补一句简短提示 ----
+  if (ids && ids.length){ _silent = 0; }
+  else if (++_silent >= SILENT_MAX){ _silent = 0; ids = ["grp_clean_short"]; }
+  return ids;
 }
